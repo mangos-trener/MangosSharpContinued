@@ -64,55 +64,6 @@ public class LegacyWorldCluster : IClusterContext
 
     public delegate void HandlePacket(PacketClass packet, ClientClass client);
 
-    public void LoadConfig()
-    {
-        // DONE: Setting SQL Connections
-        var accountDbSettings = Strings.Split(_mangosConfiguration.Cluster.AccountDatabase, ";");
-        if (accountDbSettings.Length != 6)
-        {
-            Console.WriteLine("Invalid connect string for the account database!");
-        }
-        else
-        {
-            database.GetAccountDatabase().SQLDBName = accountDbSettings[4];
-            database.GetAccountDatabase().SQLHost = accountDbSettings[2];
-            database.GetAccountDatabase().SQLPort = accountDbSettings[3];
-            database.GetAccountDatabase().SQLUser = accountDbSettings[0];
-            database.GetAccountDatabase().SQLPass = accountDbSettings[1];
-            database.GetAccountDatabase().SQLTypeServer = (SQL.DB_Type)Enum.Parse(typeof(SQL.DB_Type), accountDbSettings[5]);
-        }
-
-        var characterDbSettings = Strings.Split(_mangosConfiguration.Cluster.CharacterDatabase, ";");
-        if (characterDbSettings.Length != 6)
-        {
-            Console.WriteLine("Invalid connect string for the character database!");
-        }
-        else
-        {
-            database.GetCharacterDatabase().SQLDBName = characterDbSettings[4];
-            database.GetCharacterDatabase().SQLHost = characterDbSettings[2];
-            database.GetCharacterDatabase().SQLPort = characterDbSettings[3];
-            database.GetCharacterDatabase().SQLUser = characterDbSettings[0];
-            database.GetCharacterDatabase().SQLPass = characterDbSettings[1];
-            database.GetCharacterDatabase().SQLTypeServer = (SQL.DB_Type)Enum.Parse(typeof(SQL.DB_Type), characterDbSettings[5]);
-        }
-
-        var worldDbSettings = Strings.Split(_mangosConfiguration.Cluster.WorldDatabase, ";");
-        if (worldDbSettings.Length != 6)
-        {
-            Console.WriteLine("Invalid connect string for the world database!");
-        }
-        else
-        {
-            database.GetWorldDatabase().SQLDBName = worldDbSettings[4];
-            database.GetWorldDatabase().SQLHost = worldDbSettings[2];
-            database.GetWorldDatabase().SQLPort = worldDbSettings[3];
-            database.GetWorldDatabase().SQLUser = worldDbSettings[0];
-            database.GetWorldDatabase().SQLPass = worldDbSettings[1];
-            database.GetWorldDatabase().SQLTypeServer = (SQL.DB_Type)Enum.Parse(typeof(SQL.DB_Type), worldDbSettings[5]);
-        }
-    }
-
     private readonly Dictionary<Opcodes, HandlePacket> _packetHandlers = new();
 
     public Dictionary<Opcodes, HandlePacket> GetPacketHandlers()
@@ -176,7 +127,6 @@ public class LegacyWorldCluster : IClusterContext
 
     public async Task StartAsync()
     {
-        LoadConfig();
         database.GetAccountDatabase().SQLMessage += AccountSqlEventHandler;
         database.GetCharacterDatabase().SQLMessage += CharacterSqlEventHandler;
         database.GetWorldDatabase().SQLMessage += WorldSqlEventHandler;

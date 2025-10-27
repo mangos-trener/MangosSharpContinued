@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Common.Legacy.Databases;
 using Mangos.MySql.GetAccountInfo;
 using Mangos.MySql.GetRealmList;
 using Mangos.MySql.IsBannedAccount;
@@ -28,6 +29,9 @@ public static class DependencyInjection
     public static IServiceCollection AddDatabase(this IServiceCollection services)
     {
         services.AddSingleton<ConnectionFactory>();
+        services.AddSingleton<AccountDatabase>();
+        services.AddSingleton<CharacterDatabase>();
+        services.AddSingleton<WorldDatabase>();
 
         services.AddSingleton(provider =>
         {

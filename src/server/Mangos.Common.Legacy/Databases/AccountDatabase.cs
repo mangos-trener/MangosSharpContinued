@@ -16,5 +16,27 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Configuration;
+using Microsoft.Extensions.Logging;
+using System;
+
 namespace Mangos.Common.Legacy.Databases;
-public class AccountDatabase : SQL;
+public class AccountDatabase : SQL
+{
+    public AccountDatabase(ILogger<AccountDatabase> logger, MangosConfiguration configuration)
+    {
+        if (configuration == null || configuration.World == null || configuration.World.AccountDatabase == null)
+        {
+            logger.LogError("No connection string found for the account database!");
+        }
+
+        var connectionStringValues = configuration.World.AccountDatabase.Split(';', StringSplitOptions.RemoveEmptyEntries);
+
+        SQLUser = connectionStringValues[0];
+        SQLDBName = connectionStringValues[4];
+        SQLHost = connectionStringValues[2];
+        SQLPort = connectionStringValues[3];
+        SQLPass = connectionStringValues[1];
+        SQLTypeServer = (SQL.DB_Type)Enum.Parse(typeof(SQL.DB_Type), connectionStringValues[5]);
+    }
+}

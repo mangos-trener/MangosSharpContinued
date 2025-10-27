@@ -18,7 +18,6 @@
 
 using GameServer.DependencyInjection;
 using Mangos.Cluster;
-using Mangos.Common.Legacy.Databases;
 using Mangos.Common.Legacy.Globals;
 using Mangos.Configuration;
 using Mangos.Logging;
@@ -39,16 +38,7 @@ var host = Host.CreateDefaultBuilder(args)
             .AddGameModule()
             .AddLegacyClusterServices()
             .AddLegacyWorldServices()
-            .AddSingleton<AccountDatabase>()
-            .AddSingleton<CharacterDatabase>()
-            .AddSingleton<WorldDatabase>()
             .AddFactories();
-
-        //services.BuildServiceProvider(new ServiceProviderOptions
-        //{
-        //    //ValidateScopes = true,
-        //    ValidateOnBuild = true
-        //});
     })
     .Build();
 
@@ -60,16 +50,7 @@ var logger = host.Services.GetRequiredService<IMangosLogger>();
 var tcpServer = host.Services.GetRequiredService<TcpServer>();
 var legacyWorldCluster = host.Services.GetRequiredService<LegacyWorldCluster>();
 //WorldServiceLocator.Container = host.Services;
-WorldServer worldServer;
-try
-{
-    worldServer = host.Services.GetRequiredService<WorldServer>();
-
-}
-catch (Exception ex)
-{
-    Console.WriteLine(ex.Message);
-}
+var worldServer = host.Services.GetRequiredService<WorldServer>();
 
 logger.Trace(@" __  __      _  _  ___  ___  ___               ");
 logger.Trace(@"|  \/  |__ _| \| |/ __|/ _ \/ __|   We Love    ");

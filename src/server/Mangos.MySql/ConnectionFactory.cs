@@ -33,7 +33,7 @@ internal sealed class ConnectionFactory
 
     public AccountConnection ConnectToAccountDataBase()
     {
-        var mySqlConnection = new MySqlConnection(mangosConfiguration.AccountDataBaseConnectionString);
+        var mySqlConnection = new MySqlConnection(mangosConfiguration.AccountDatabaseConnectionString);
         mySqlConnection.Open();
         return new AccountConnection(mySqlConnection);
     }

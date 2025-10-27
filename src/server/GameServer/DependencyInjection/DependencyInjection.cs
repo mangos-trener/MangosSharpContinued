@@ -97,33 +97,17 @@ public static class DependencyInjection
 
     public static IServiceCollection AddCustomLogging(this IServiceCollection services)
     {
-        try
+        services.AddSingleton<ILoggerProvider>(sp =>
         {
-            services.AddSingleton<ILoggerProvider>(sp =>
-            {
-                var config = sp.GetRequiredService<MangosConfiguration>();
+            var config = sp.GetRequiredService<MangosConfiguration>();
 
-                var writer = BaseWriter.CreateLog(config.World.LogType, config.World.LogConfig);
-                writer.LogLevel = LogType.INFORMATION;
+            var writer = BaseWriter.CreateLog(config.World.LogType, config.World.LogConfig);
+            writer.LogLevel = LogType.INFORMATION;
 
-                return new BaseWriterLoggerProvider(writer);
-            });
+            return new BaseWriterLoggerProvider(writer);
+        });
 
-            //services.AddLogging(builder =>
-            //{
-            //    builder.
-            //    builder.ClearProviders();
-            //    builder.Services.AddSingleton<ILoggerProvider>(sp =>
-            //        sp.GetRequiredService<ILoggerProvider>());
-            //});
-
-            services.AddMangosLogger();
-
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.Message);
-        }
+        services.AddMangosLogger();
 
         return services;
     }
@@ -139,8 +123,6 @@ public static class DependencyInjection
     {
         services.AddSingleton<TcpServer>();
         services.AddSingleton<ICluster, WorldServerClass>();
-
-        //services.AddScoped<ITcpConnection>();
 
         return services;
     }
@@ -168,16 +150,10 @@ public static class DependencyInjection
         services.AddSingleton<ClientClass>();
 
         services.AddSingleton<DataStoreProvider>();
-        //services.AddSingleton<MangosGlobalConstants>();
-        //services.AddSingleton<Mangos.Common.Legacy.Globals.GlobalFunctions>();
-        //services.AddSingleton<Mangos.Common.Legacy.StringFormatFunctions>();
-        //services.AddSingleton<Mangos.Cluster.Globals.GlobalFunctions>();
         services.AddSingleton<ZipService>();
         services.AddSingleton<Mangos.World.Warden.NativeMethods>();
         services.AddSingleton<LegacyWorldCluster>();
         services.AddSingleton<IClusterContext>(sp => sp.GetRequiredService<LegacyWorldCluster>());
-        //services.AddSingleton<LegacyWorldCluster>();
-        //services.AddSingleton<WorldServerClass>();
         services.AddSingleton<WsDbcDatabase>();
         services.AddSingleton<WsDbcLoad>();
         services.AddSingleton<Packets>();
@@ -204,14 +180,9 @@ public static class DependencyInjection
 
     public static IServiceCollection AddLegacyWorldServices(this IServiceCollection services)
     {
-        //services.AddSingleton<MangosGlobalConstants>();
-        //services.AddSingleton<Mangos.Common.Legacy.Globals.GlobalFunctions>();
-        //services.AddSingleton<Mangos.Common.Legacy.StringFormatFunctions>();
-        //services.AddSingleton<Mangos.Common.Legacy.LegacyNativeMethods>();
         services.AddSingleton<ZipService>();
         services.AddSingleton<WorldServer>();
         services.AddSingleton<WorldState>();
-        //services.AddSingleton<Mangos.Cluster.Globals.GlobalFunctions>();
         services.AddSingleton<DataStoreProvider>();
 
         services.AddSingleton<Mangos.World.AI.WS_Creatures_AI>();

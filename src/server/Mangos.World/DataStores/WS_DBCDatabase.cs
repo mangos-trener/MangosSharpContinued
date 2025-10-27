@@ -33,7 +33,6 @@ namespace Mangos.World.DataStores;
 public class WS_DBCDatabase
 {
     private readonly ILogger<WS_DBCDatabase> logger;
-    private readonly WorldState worldState;
     private readonly WorldDatabase worldDatabase;
     private readonly CharacterDatabase characterDatabase;
 
@@ -533,10 +532,13 @@ public class WS_DBCDatabase
 
     public WS_DBCDatabase(
         ILogger<WS_DBCDatabase> logger,
-        WorldState worldState,
         WorldDatabase worldDatabase,
         CharacterDatabase characterDatabase)
     {
+        this.logger = logger;
+        this.worldDatabase = worldDatabase;
+        this.characterDatabase = characterDatabase;
+
         EmotesState = new Dictionary<int, int>();
         EmotesText = new Dictionary<int, int>();
         SkillLines = new Dictionary<int, int>();
@@ -568,10 +570,6 @@ public class WS_DBCDatabase
         CreatureMovement = new Dictionary<int, Dictionary<int, CreatureMovePoint>>();
         CreatureEquip = new Dictionary<int, CreatureEquipInfo>();
         CreatureModel = new Dictionary<int, CreatureModelInfo>();
-        this.logger = logger;
-        this.worldState = worldState;
-        this.worldDatabase = worldDatabase;
-        this.characterDatabase = characterDatabase;
     }
 
     public int GetNearestTaxi(float x, float y, int map)
