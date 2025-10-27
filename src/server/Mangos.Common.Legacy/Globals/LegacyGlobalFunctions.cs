@@ -27,78 +27,76 @@ using System.Data;
 
 namespace Mangos.Common.Legacy.Globals;
 
-public class Functions
+public static class LegacyGlobalFunctions
 {
-    private readonly MangosGlobalConstants mangosGlobalConstants;
-    private readonly IMangosLogger logger;
+    private static IMangosLogger _logger;
 
-    public Functions(IMangosLogger logger, MangosGlobalConstants mangosGlobalConstants)
+    public static void InitializeLogger(IMangosLogger logger)
     {
-        this.logger = logger;
-        this.mangosGlobalConstants = mangosGlobalConstants;
+        _logger = logger;
     }
 
-    public bool GuidIsCreature(ulong guid)
+    public static bool GuidIsCreature(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_UNIT;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_UNIT;
     }
 
-    public bool GuidIsPet(ulong guid)
+    public static bool GuidIsPet(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_PET;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_PET;
     }
 
-    public bool GuidIsItem(ulong guid)
+    public static bool GuidIsItem(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_ITEM;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_ITEM;
     }
 
-    public bool GuidIsGameObject(ulong guid)
+    public static bool GuidIsGameObject(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_GAMEOBJECT;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_GAMEOBJECT;
     }
 
-    public bool GuidIsDnyamicObject(ulong guid)
+    public static bool GuidIsDnyamicObject(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_DYNAMICOBJECT;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_DYNAMICOBJECT;
     }
 
-    public bool GuidIsTransport(ulong guid)
+    public static bool GuidIsTransport(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_TRANSPORT;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_TRANSPORT;
     }
 
-    public bool GuidIsMoTransport(ulong guid)
+    public static bool GuidIsMoTransport(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_MO_TRANSPORT;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_MO_TRANSPORT;
     }
 
-    public bool GuidIsCorpse(ulong guid)
+    public static bool GuidIsCorpse(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_CORPSE;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_CORPSE;
     }
 
-    public bool GuidIsPlayer(ulong guid)
+    public static bool GuidIsPlayer(ulong guid)
     {
-        return GuidHigh2(guid) == mangosGlobalConstants.GUID_PLAYER;
+        return GuidHigh2(guid) == MangosGlobalConstants.GUID_PLAYER;
     }
 
-    public ulong GuidHigh2(ulong guid)
+    public static ulong GuidHigh2(ulong guid)
     {
-        return guid & mangosGlobalConstants.GUID_MASK_HIGH;
+        return guid & MangosGlobalConstants.GUID_MASK_HIGH;
     }
 
-    public uint GuidHigh(ulong guid)
+    public static uint GuidHigh(ulong guid)
     {
-        return (uint)((guid & mangosGlobalConstants.GUID_MASK_HIGH) >> 32);
+        return (uint)((guid & MangosGlobalConstants.GUID_MASK_HIGH) >> 32);
     }
 
-    public uint GuidLow(ulong guid)
+    public static uint GuidLow(ulong guid)
     {
-        return (uint)(guid & mangosGlobalConstants.GUID_MASK_LOW);
+        return (uint)(guid & MangosGlobalConstants.GUID_MASK_LOW);
     }
 
-    public int GetShapeshiftModel(ShapeshiftForm form, Races race, int model)
+    public static int GetShapeshiftModel(ShapeshiftForm form, Races race, int model)
     {
         switch (form)
         {
@@ -220,7 +218,7 @@ public class Functions
         return default;
     }
 
-    public ManaTypes GetShapeshiftManaType(ShapeshiftForm form, ManaTypes manaType)
+    public static ManaTypes GetShapeshiftManaType(ShapeshiftForm form, ManaTypes manaType)
     {
         switch (form)
         {
@@ -255,7 +253,7 @@ public class Functions
         }
     }
 
-    public bool CheckRequiredDbVersion(SQL thisDatabase, ServerDb thisServerDb)
+    public static bool CheckRequiredDbVersion(SQL thisDatabase, ServerDb thisServerDb)
     {
         DataTable mySqlQuery = new();
         // thisDatabase.Query(String.Format("SELECT column_name FROM information_schema.columns WHERE table_name='" & thisTableName & "'  AND TABLE_SCHEMA='" & thisDatabase.SQLDBName & "'"), mySqlQuery)
@@ -269,31 +267,31 @@ public class Functions
         {
             case ServerDb.Realm:
                 {
-                    coreDbVersion = mangosGlobalConstants.RevisionDbRealmVersion;
-                    coreDbStructure = mangosGlobalConstants.RevisionDbRealmStructure;
-                    coreDbContent = mangosGlobalConstants.RevisionDbRealmContent;
+                    coreDbVersion = MangosGlobalConstants.RevisionDbRealmVersion;
+                    coreDbStructure = MangosGlobalConstants.RevisionDbRealmStructure;
+                    coreDbContent = MangosGlobalConstants.RevisionDbRealmContent;
                     break;
                 }
 
             case ServerDb.Character:
                 {
-                    coreDbVersion = mangosGlobalConstants.RevisionDbCharactersVersion;
-                    coreDbStructure = mangosGlobalConstants.RevisionDbCharactersStructure;
-                    coreDbContent = mangosGlobalConstants.RevisionDbCharactersContent;
+                    coreDbVersion = MangosGlobalConstants.RevisionDbCharactersVersion;
+                    coreDbStructure = MangosGlobalConstants.RevisionDbCharactersStructure;
+                    coreDbContent = MangosGlobalConstants.RevisionDbCharactersContent;
                     break;
                 }
 
             case ServerDb.World:
                 {
-                    coreDbVersion = mangosGlobalConstants.RevisionDbMangosVersion;
-                    coreDbStructure = mangosGlobalConstants.RevisionDbMangosStructure;
-                    coreDbContent = mangosGlobalConstants.RevisionDbMangosContent;
+                    coreDbVersion = MangosGlobalConstants.RevisionDbMangosVersion;
+                    coreDbStructure = MangosGlobalConstants.RevisionDbMangosStructure;
+                    coreDbContent = MangosGlobalConstants.RevisionDbMangosContent;
                     break;
                 }
 
             case 0:
                 {
-                    logger.Warning(string.Format("Default switch fallback has occured with an error, data output: ThisServerDb {0}, CoreDbVersion {1}, CoreDbContent {2}, CoreDbVersion {3}", thisServerDb, coreDbVersion, coreDbContent, coreDbVersion));
+                    _logger.Warning(string.Format("Default switch fallback has occured with an error, data output: ThisServerDb {0}, CoreDbVersion {1}, CoreDbContent {2}, CoreDbVersion {3}", thisServerDb, coreDbVersion, coreDbContent, coreDbVersion));
                     break;
                 }
         }
@@ -311,40 +309,40 @@ public class Functions
 
             if (dbVersion == coreDbVersion && dbStructure == coreDbStructure && dbContent == coreDbContent) // Full Match
             {
-                logger.Trace(string.Format("[{0}] Db Version Matched", Strings.Format(DateAndTime.TimeOfDay, "hh:mm:ss")));
+                _logger.Trace(string.Format("[{0}] Db Version Matched", Strings.Format(DateAndTime.TimeOfDay, "hh:mm:ss")));
                 return true;
             }
 
             if (dbVersion == coreDbVersion && dbStructure == coreDbStructure && dbContent != coreDbContent) // Content MisMatch, only a warning
             {
-                logger.Warning("--------------------------------------------------------------");
-                logger.Warning("-- WARNING: CONTENT VERSION MISMATCH                        --");
-                logger.Warning("--------------------------------------------------------------");
-                logger.Warning("Your Database " + thisDatabase.SQLDBName + " requires updating.");
-                logger.Warning(string.Format("You have: Rev{0}.{1}.{2}, however the core expects Rev{3}.{4}.{5}", dbVersion, dbStructure, dbContent, coreDbVersion, coreDbStructure, coreDbContent));
-                logger.Warning("The server will run, but you may be missing some database fixes");
+                _logger.Warning("--------------------------------------------------------------");
+                _logger.Warning("-- WARNING: CONTENT VERSION MISMATCH                        --");
+                _logger.Warning("--------------------------------------------------------------");
+                _logger.Warning("Your Database " + thisDatabase.SQLDBName + " requires updating.");
+                _logger.Warning(string.Format("You have: Rev{0}.{1}.{2}, however the core expects Rev{3}.{4}.{5}", dbVersion, dbStructure, dbContent, coreDbVersion, coreDbStructure, coreDbContent));
+                _logger.Warning("The server will run, but you may be missing some database fixes");
                 return true;
             }
 
-            logger.Error("--------------------------------------------------------------");
-            logger.Error("-- FATAL ERROR: VERSION MISMATCH                            --");
-            logger.Error("--------------------------------------------------------------");
-            logger.Error("Your Database " + thisDatabase.SQLDBName + " requires updating.");
-            logger.Error(string.Format("You have: Rev{0}.{1}.{2}, however the core expects Rev{3}.{4}.{5}", dbVersion, dbStructure, dbContent, coreDbVersion, coreDbStructure, coreDbContent));
-            logger.Error("The server is unable to run until the required updates are run");
-            logger.Error("--------------------------------------------------------------");
-            logger.Error(string.Format("You must apply all updates after Rev{1}.{2}.{3} ", coreDbVersion, coreDbStructure, coreDbContent));
-            logger.Error("These updates are included in the sql/updates folder.");
-            logger.Error("--------------------------------------------------------------");
+            _logger.Error("--------------------------------------------------------------");
+            _logger.Error("-- FATAL ERROR: VERSION MISMATCH                            --");
+            _logger.Error("--------------------------------------------------------------");
+            _logger.Error("Your Database " + thisDatabase.SQLDBName + " requires updating.");
+            _logger.Error(string.Format("You have: Rev{0}.{1}.{2}, however the core expects Rev{3}.{4}.{5}", dbVersion, dbStructure, dbContent, coreDbVersion, coreDbStructure, coreDbContent));
+            _logger.Error("The server is unable to run until the required updates are run");
+            _logger.Error("--------------------------------------------------------------");
+            _logger.Error(string.Format("You must apply all updates after Rev{1}.{2}.{3} ", coreDbVersion, coreDbStructure, coreDbContent));
+            _logger.Error("These updates are included in the sql/updates folder.");
+            _logger.Error("--------------------------------------------------------------");
             return false;
         }
 
-        logger.Trace("--------------------------------------------------------------");
-        logger.Trace("The table `db_version` in database " + thisDatabase.SQLDBName + " is missing");
-        logger.Trace("--------------------------------------------------------------");
-        logger.Trace(string.Format("MaNGOSVB cannot find the version info required, please update"));
-        logger.Trace(string.Format("your database to check that the db is up to date."));
-        logger.Trace(string.Format("your database to Rev{0}.{1}.{2} ", coreDbVersion, coreDbStructure, coreDbContent));
+        _logger.Trace("--------------------------------------------------------------");
+        _logger.Trace("The table `db_version` in database " + thisDatabase.SQLDBName + " is missing");
+        _logger.Trace("--------------------------------------------------------------");
+        _logger.Trace(string.Format("MaNGOSVB cannot find the version info required, please update"));
+        _logger.Trace(string.Format("your database to check that the db is up to date."));
+        _logger.Trace(string.Format("your database to Rev{0}.{1}.{2} ", coreDbVersion, coreDbStructure, coreDbContent));
         return false;
     }
 }

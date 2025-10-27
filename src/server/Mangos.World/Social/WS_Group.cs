@@ -19,6 +19,7 @@
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Group;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy;
 using Mangos.World.Globals;
 using Mangos.World.Player;
 using System;
@@ -30,6 +31,8 @@ public class WS_Group
 {
     public sealed class Group : IDisposable
     {
+        private readonly ICluster cluster;
+        private readonly WorldState worldState;
         public readonly long ID;
 
         public GroupType Type;
@@ -44,16 +47,18 @@ public class WS_Group
 
         public List<ulong> LocalMembers;
 
-        public WS_PlayerData.CharacterObject LocalLootMaster;
+        public CharacterObject LocalLootMaster;
 
         private bool _disposedValue;
 
-        public Group(long groupID)
+        public Group(ICluster cluster, WorldState worldState, long groupID)
         {
             Type = GroupType.PARTY;
             DungeonDifficulty = GroupDungeonDifficulty.DIFFICULTY_NORMAL;
             LootMethod = GroupLootMethod.LOOT_GROUP;
             LootThreshold = GroupLootThreshold.Uncommon;
+            this.cluster = cluster;
+            this.worldState = worldState;
             ID = groupID;
             WorldServiceLocator.WSGroup.Groups.Add(ID, this);
         }
@@ -82,10 +87,10 @@ public class WS_Group
         public void Broadcast(Packets.PacketClass p)
         {
             p.UpdateLength();
-            WorldServiceLocator.WorldServer.ClsWorldServer.Cluster.BroadcastGroup(ID, p.Data);
+            cluster.BroadcastGroup(ID, p.Data);
         }
 
-        public WS_PlayerData.CharacterObject GetNextLooter()
+        public CharacterObject GetNextLooter()
         {
             var nextIsLooter = false;
             var nextLooterFound = false;
@@ -106,7 +111,7 @@ public class WS_Group
             {
                 WorldServiceLocator.WSGroup._lastLooter = LocalMembers[0];
             }
-            return WorldServiceLocator.WorldServer.CHARACTERs[WorldServiceLocator.WSGroup._lastLooter];
+            return worldState.Characters[WorldServiceLocator.WSGroup._lastLooter];
         }
 
         public int GetMembersCount()
@@ -125,7 +130,7 @@ public class WS_Group
         _lastLooter = 0uL;
     }
 
-    public Packets.PacketClass BuildPartyMemberStats(ref WS_PlayerData.CharacterObject objCharacter, uint flag)
+    public Packets.PacketClass BuildPartyMemberStats(ref CharacterObject objCharacter, uint flag)
     {
         var opCode = Opcodes.SMSG_PARTY_MEMBER_STATS;
         if (flag is 1015 or 524279)
@@ -214,7 +219,7 @@ public class WS_Group
                 var auraMask2 = 0uL;
                 var auraPos2 = packet.Data.Length;
                 packet.AddUInt64(0uL);
-                var num = WorldServiceLocator.GlobalConstants.MAX_AURA_EFFECTs_VISIBLE - 1;
+                var num = MangosGlobalConstants.MAX_AURA_EFFECTs_VISIBLE - 1;
                 for (var j = 0; j <= num; j++)
                 {
                     if (objCharacter.ActiveSpells[j] != null)
@@ -324,7 +329,7 @@ public class WS_Group
                     var auraMask = 0uL;
                     var auraPos = packet.Data.Length;
                     packet.AddUInt64(0uL);
-                    var num2 = WorldServiceLocator.GlobalConstants.MAX_AURA_EFFECTs_VISIBLE - 1;
+                    var num2 = MangosGlobalConstants.MAX_AURA_EFFECTs_VISIBLE - 1;
                     for (var i = 0; i <= num2; i++)
                     {
                         if (objCharacter.Pet.ActiveSpells[i] != null)

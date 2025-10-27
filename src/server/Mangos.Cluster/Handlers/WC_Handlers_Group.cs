@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Globals;
 using Mangos.Cluster.Network;
 using Mangos.Common.Enums.Chat;
@@ -23,6 +24,7 @@ using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Group;
 using Mangos.Common.Enums.Misc;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
@@ -34,11 +36,17 @@ namespace Mangos.Cluster.Handlers;
 
 public class WcHandlersGroup
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly LegacyWorldCluster cluster;
+    private readonly WcNetwork network;
+    private readonly WcHandlerCharacter character;
+    private readonly WsDbcDatabase database;
 
-    public WcHandlersGroup(ClusterServiceLocator clusterServiceLocator)
+    public WcHandlersGroup(LegacyWorldCluster cluster, WcNetwork network, WcHandlerCharacter character, WsDbcDatabase database)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.cluster = cluster;
+        this.network = network;
+        this.character = character;
+        this.database = database;
     }
 
     // Used as counter for unique Group.ID
@@ -48,8 +56,11 @@ public class WcHandlersGroup
 
     public class Group : IDisposable
     {
-        private readonly ClusterServiceLocator _clusterServiceLocator;
-
+        private readonly LegacyWorldCluster cluster;
+        private readonly WcNetwork network;
+        private readonly WcHandlersGroup group;
+        private readonly WcHandlerCharacter character;
+        private readonly WsDbcDatabase database;
         public long Id;
         public GroupType Type = GroupType.PARTY;
         public GroupDungeonDifficulty DungeonDifficulty = GroupDungeonDifficulty.DIFFICULTY_NORMAL;
@@ -60,12 +71,16 @@ public class WcHandlersGroup
         public WcHandlerCharacter.CharacterObject[] Members;
         public ulong[] TargetIcons = new ulong[8];
 
-        public Group(WcHandlerCharacter.CharacterObject objCharacter, ClusterServiceLocator clusterServiceLocator)
+        public Group(WcHandlerCharacter.CharacterObject objCharacter, LegacyWorldCluster cluster, WcNetwork network, WcHandlersGroup group, WcHandlerCharacter character, WsDbcDatabase database)
         {
-            _clusterServiceLocator = clusterServiceLocator;
-            Members = new WcHandlerCharacter.CharacterObject[_clusterServiceLocator.GlobalConstants.GROUP_SIZE + 1];
-            Id = Interlocked.Increment(ref _clusterServiceLocator.WcHandlersGroup._groupCounter);
-            _clusterServiceLocator.WcHandlersGroup.GrouPs.Add(Id, this);
+            this.cluster = cluster;
+            this.network = network;
+            this.group = group;
+            this.character = character;
+            this.database = database;
+            Members = new WcHandlerCharacter.CharacterObject[MangosGlobalConstants.GROUP_SIZE + 1];
+            Id = Interlocked.Increment(ref group._groupCounter);
+            group.GrouPs.Add(Id, this);
             Members[0] = objCharacter;
             Members[1] = null;
             Members[2] = null;
@@ -115,8 +130,8 @@ public class WcHandlersGroup
                 }
 
                 packet.Dispose();
-                _clusterServiceLocator.WcNetwork.WorldServer.GroupSendUpdate(Id);
-                _clusterServiceLocator.WcHandlersGroup.GrouPs.Remove(Id);
+                network.WorldServer.GroupSendUpdate(Id);
+                group.GrouPs.Remove(Id);
             }
 
             _disposedValue = true;
@@ -143,7 +158,7 @@ public class WcHandlersGroup
                 }
             }
 
-            _clusterServiceLocator.WcNetwork.WorldServer.GroupSendUpdate(Id);
+            network.WorldServer.GroupSendUpdate(Id);
             objCharacter.GetWorld.ClientSetGroup(objCharacter.Client.Index, Id);
             SendGroupList();
         }
@@ -186,7 +201,7 @@ public class WcHandlersGroup
                 }
             }
 
-            _clusterServiceLocator.WcNetwork.WorldServer.GroupSendUpdate(Id);
+            network.WorldServer.GroupSendUpdate(Id);
             objCharacter.GetWorld.ClientSetGroup(objCharacter.Client.Index, -1);
             CheckMembers();
         }
@@ -246,7 +261,7 @@ public class WcHandlersGroup
                 response.AddString(Members[Leader].Name);
                 Broadcast(response);
                 response.Dispose();
-                _clusterServiceLocator.WcNetwork.WorldServer.GroupSendUpdate(Id);
+                network.WorldServer.GroupSendUpdate(Id);
             }
         }
 
@@ -268,8 +283,8 @@ public class WcHandlersGroup
 
         public void ConvertToRaid()
         {
-            Array.Resize(ref Members, _clusterServiceLocator.GlobalConstants.GROUP_RAIDSIZE + 1);
-            for (int i = _clusterServiceLocator.GlobalConstants.GROUP_SIZE + 1, loopTo = _clusterServiceLocator.GlobalConstants.GROUP_RAIDSIZE; i <= loopTo; i++)
+            Array.Resize(ref Members, MangosGlobalConstants.GROUP_RAIDSIZE + 1);
+            for (int i = MangosGlobalConstants.GROUP_SIZE + 1, loopTo = MangosGlobalConstants.GROUP_RAIDSIZE; i <= loopTo; i++)
             {
                 Members[i] = null;
             }
@@ -292,7 +307,7 @@ public class WcHandlersGroup
             packet.AddString(objCharacter.Name);
             Broadcast(packet);
             packet.Dispose();
-            _clusterServiceLocator.WcNetwork.WorldServer.GroupSendUpdate(Id);
+            network.WorldServer.GroupSendUpdate(Id);
             SendGroupList();
         }
 
@@ -392,7 +407,7 @@ public class WcHandlersGroup
             {
                 if (Members[i] is not null && !ReferenceEquals(Members[i], objCharacter) && Members[i].Client is not null)
                 {
-                    if (objCharacter.Map != Members[i].Map || Math.Sqrt(Math.Pow(objCharacter.PositionX - Members[i].PositionX, 2d) + Math.Pow(objCharacter.PositionY - Members[i].PositionY, 2d)) > _clusterServiceLocator.GlobalConstants.DEFAULT_DISTANCE_VISIBLE)
+                    if (objCharacter.Map != Members[i].Map || Math.Sqrt(Math.Pow(objCharacter.PositionX - Members[i].PositionX, 2d) + Math.Pow(objCharacter.PositionY - Members[i].PositionY, 2d)) > MangosGlobalConstants.DEFAULT_DISTANCE_VISIBLE)
                     {
                         Members[i].Client.SendMultiplyPackets(packet);
                     }
@@ -409,7 +424,7 @@ public class WcHandlersGroup
                 {
                     PacketClass packet = new(Opcodes.SMSG_GROUP_LIST);
                     packet.AddInt8((byte)Type);                                    // GroupType 0:Party 1:Raid
-                    var memberFlags = (byte)(i / _clusterServiceLocator.GlobalConstants.GROUP_SUBGROUPSIZE);
+                    var memberFlags = (byte)(i / MangosGlobalConstants.GROUP_SUBGROUPSIZE);
                     // If Members(i).GroupAssistant Then MemberFlags = MemberFlags Or &H1
                     packet.AddInt8(memberFlags);
                     packet.AddInt32(groupCount - 1);
@@ -428,7 +443,7 @@ public class WcHandlersGroup
                                 packet.AddInt8(0);
                             }                           // CharOnline?
 
-                            memberFlags = (byte)(j / _clusterServiceLocator.GlobalConstants.GROUP_SUBGROUPSIZE);
+                            memberFlags = (byte)(j / MangosGlobalConstants.GROUP_SUBGROUPSIZE);
                             // If Members(j).GroupAssistant Then MemberFlags = MemberFlags Or &H1
                             packet.AddInt8(memberFlags);
                         }
@@ -456,7 +471,7 @@ public class WcHandlersGroup
 
         public void SendChatMessage(WcHandlerCharacter.CharacterObject sender, string message, LANGUAGES language, ChatMsg thisType)
         {
-            var packet = _clusterServiceLocator.Functions.BuildChatMessage(sender.Guid, message, thisType, language, (byte)sender.ChatFlag);
+            var packet = GlobalFunctions.BuildChatMessage(cluster, sender.Guid, message, thisType, language, (byte)sender.ChatFlag);
             Broadcast(packet);
             packet.Dispose();
         }
@@ -464,11 +479,11 @@ public class WcHandlersGroup
 
     public void On_CMSG_REQUEST_RAID_INFO(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_REQUEST_RAID_INFO", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_REQUEST_RAID_INFO", client.IP, client.Port);
         DataTable q = new();
         if (client.Character is not null)
         {
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT * FROM characters_instances WHERE char_guid = {0};", client.Character.Guid), ref q);
+            database.GetCharacterDatabase().Query(string.Format("SELECT * FROM characters_instances WHERE char_guid = {0};", client.Character.Guid), ref q);
         }
 
         PacketClass response = new(Opcodes.SMSG_RAID_INSTANCE_INFO);
@@ -477,7 +492,7 @@ public class WcHandlersGroup
         foreach (DataRow r in q.Rows)
         {
             response.AddUInt32(Conversions.ToUInteger(r["map"]));                               // MapID
-            response.AddUInt32((uint)(Conversions.ToInteger(r["expire"]) - _clusterServiceLocator.Functions.GetTimestamp(DateAndTime.Now)));  // TimeLeft
+            response.AddUInt32((uint)(Conversions.ToInteger(r["expire"]) - GlobalFunctions.GetTimestamp(DateAndTime.Now)));  // TimeLeft
             response.AddUInt32(Conversions.ToUInteger(r["instance"]));                          // InstanceID
             response.AddUInt32((uint)i);                                           // Counter
             i += 1;
@@ -505,53 +520,53 @@ public class WcHandlersGroup
         }
 
         packet.GetInt16();
-        var name = _clusterServiceLocator.Functions.CapitalizeName(packet.GetString());
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_INVITE [{2}]", client.IP, client.Port, name);
+        var name = GlobalFunctions.CapitalizeName(packet.GetString());
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_INVITE [{2}]", client.IP, client.Port, name);
         var guid = 0UL;
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.AcquireReaderLock(_clusterServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-        foreach (var character in _clusterServiceLocator.WorldCluster.CharacteRs)
+        cluster.CharacteRsLock.AcquireReaderLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
+        foreach (var character in cluster.CharacteRs)
         {
-            if (_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(character.Value.Name) == _clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(name))
+            if (StringFormatFunctions.UppercaseFirstLetter(character.Value.Name) == StringFormatFunctions.UppercaseFirstLetter(name))
             {
                 guid = character.Value.Guid;
                 break;
             }
         }
 
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.ReleaseReaderLock();
+        cluster.CharacteRsLock.ReleaseReaderLock();
         var errCode = PartyCommandResult.INVITE_OK;
         // TODO: InBattlegrounds: INVITE_RESTRICTED
         if (guid == 0m)
         {
             errCode = PartyCommandResult.INVITE_NOT_FOUND;
         }
-        else if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].IsInWorld == false)
+        else if (cluster.CharacteRs[guid].IsInWorld == false)
         {
             errCode = PartyCommandResult.INVITE_NOT_FOUND;
         }
-        else if (_clusterServiceLocator.Functions.GetCharacterSide((byte)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Race) != _clusterServiceLocator.Functions.GetCharacterSide((byte)client.Character.Race))
+        else if (GlobalFunctions.GetCharacterSide((byte)cluster.CharacteRs[guid].Race) != GlobalFunctions.GetCharacterSide((byte)client.Character.Race))
         {
             errCode = PartyCommandResult.INVITE_NOT_SAME_SIDE;
         }
-        else if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].IsInGroup)
+        else if (cluster.CharacteRs[guid].IsInGroup)
         {
             errCode = PartyCommandResult.INVITE_ALREADY_IN_GROUP;
             PacketClass denied = new(Opcodes.SMSG_GROUP_INVITE);
             denied.AddInt8(0);
             denied.AddString(client.Character.Name);
-            _clusterServiceLocator.WorldCluster.CharacteRs[guid].Client.Send(denied);
+            cluster.CharacteRs[guid].Client.Send(denied);
             denied.Dispose();
         }
-        else if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].IgnoreList.Contains(client.Character.Guid))
+        else if (cluster.CharacteRs[guid].IgnoreList.Contains(client.Character.Guid))
         {
             errCode = PartyCommandResult.INVITE_IGNORED;
         }
         else if (!client.Character.IsInGroup)
         {
-            Group newGroup = new(client.Character, _clusterServiceLocator);
+            Group newGroup = new(client.Character, cluster, network, this, character, database);
             // TODO: Need to do fully test this
-            _clusterServiceLocator.WorldCluster.CharacteRs[guid].Group = newGroup;
-            _clusterServiceLocator.WorldCluster.CharacteRs[guid].GroupInvitedFlag = true;
+            cluster.CharacteRs[guid].Group = newGroup;
+            cluster.CharacteRs[guid].GroupInvitedFlag = true;
         }
         else if (client.Character.Group.IsFull)
         {
@@ -563,8 +578,8 @@ public class WcHandlersGroup
         }
         else
         {
-            _clusterServiceLocator.WorldCluster.CharacteRs[guid].Group = client.Character.Group;
-            _clusterServiceLocator.WorldCluster.CharacteRs[guid].GroupInvitedFlag = true;
+            cluster.CharacteRs[guid].Group = client.Character.Group;
+            cluster.CharacteRs[guid].GroupInvitedFlag = true;
         }
 
         SendPartyResult(client, name, PartyCommand.PARTY_OP_INVITE, errCode);
@@ -573,19 +588,19 @@ public class WcHandlersGroup
             PacketClass invited = new(Opcodes.SMSG_GROUP_INVITE);
             invited.AddInt8(1);
             invited.AddString(client.Character.Name);
-            _clusterServiceLocator.WorldCluster.CharacteRs[guid].Client.Send(invited);
+            cluster.CharacteRs[guid].Client.Send(invited);
             invited.Dispose();
         }
     }
 
     public void On_CMSG_GROUP_CANCEL(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_CANCEL", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_CANCEL", client.IP, client.Port);
     }
 
     public void On_CMSG_GROUP_ACCEPT(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_ACCEPT", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_ACCEPT", client.IP, client.Port);
         if (client.Character.GroupInvitedFlag && !client.Character.Group.IsFull)
         {
             client.Character.Group.Join(client.Character);
@@ -601,7 +616,7 @@ public class WcHandlersGroup
 
     public void On_CMSG_GROUP_DECLINE(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_DECLINE", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_DECLINE", client.IP, client.Port);
         if (client.Character.GroupInvitedFlag)
         {
             PacketClass response = new(Opcodes.SMSG_GROUP_DECLINE);
@@ -616,7 +631,7 @@ public class WcHandlersGroup
 
     public void On_CMSG_GROUP_DISBAND(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_DISBAND", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_DISBAND", client.IP, client.Port);
         if (client.Character.IsInGroup)
         {
             // TODO: InBattlegrounds: INVITE_RESTRICTED
@@ -640,19 +655,19 @@ public class WcHandlersGroup
 
         packet.GetInt16();
         var name = packet.GetString();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_UNINVITE [{2}]", client.IP, client.Port, name);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_UNINVITE [{2}]", client.IP, client.Port, name);
         var guid = 0UL;
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.AcquireReaderLock(_clusterServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-        foreach (var character in _clusterServiceLocator.WorldCluster.CharacteRs)
+        cluster.CharacteRsLock.AcquireReaderLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
+        foreach (var character in cluster.CharacteRs)
         {
-            if (_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(character.Value.Name) == _clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(name))
+            if (StringFormatFunctions.UppercaseFirstLetter(character.Value.Name) == StringFormatFunctions.UppercaseFirstLetter(name))
             {
                 guid = character.Value.Guid;
                 break;
             }
         }
 
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.ReleaseReaderLock();
+        cluster.CharacteRsLock.ReleaseReaderLock();
 
         // TODO: InBattlegrounds: INVITE_RESTRICTED
         if (guid == 0m)
@@ -665,7 +680,7 @@ public class WcHandlersGroup
         }
         else
         {
-            var tmp = _clusterServiceLocator.WorldCluster.CharacteRs;
+            var tmp = cluster.CharacteRs;
             var argobjCharacter = tmp[guid];
             client.Character.Group.Leave(argobjCharacter);
             tmp[guid] = argobjCharacter;
@@ -681,14 +696,14 @@ public class WcHandlersGroup
 
         packet.GetInt16();
         var guid = packet.GetUInt64();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_UNINVITE_GUID [0x{2:X}]", client.IP, client.Port, guid);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_UNINVITE_GUID [0x{2:X}]", client.IP, client.Port, guid);
 
         // TODO: InBattlegrounds: INVITE_RESTRICTED
         if (guid == 0m)
         {
             SendPartyResult(client, "", PartyCommand.PARTY_OP_LEAVE, PartyCommandResult.INVITE_NOT_FOUND);
         }
-        else if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid) == false)
+        else if (cluster.CharacteRs.ContainsKey(guid) == false)
         {
             SendPartyResult(client, "", PartyCommand.PARTY_OP_LEAVE, PartyCommandResult.INVITE_NOT_FOUND);
         }
@@ -698,7 +713,7 @@ public class WcHandlersGroup
         }
         else
         {
-            var tmp = _clusterServiceLocator.WorldCluster.CharacteRs;
+            var tmp = cluster.CharacteRs;
             var argobjCharacter = tmp[guid];
             client.Character.Group.Leave(argobjCharacter);
             tmp[guid] = argobjCharacter;
@@ -714,13 +729,13 @@ public class WcHandlersGroup
 
         packet.GetInt16();
         var name = packet.GetString();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_SET_LEADER [Name={2}]", client.IP, client.Port, name);
-        var guid = _clusterServiceLocator.WcHandlerCharacter.GetCharacterGuidByName(name);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_SET_LEADER [Name={2}]", client.IP, client.Port, name);
+        var guid = character.GetCharacterGuidByName(cluster, database, name);
         if (guid == 0m)
         {
             SendPartyResult(client, "", PartyCommand.PARTY_OP_INVITE, PartyCommandResult.INVITE_NOT_FOUND);
         }
-        else if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid) == false)
+        else if (cluster.CharacteRs.ContainsKey(guid) == false)
         {
             SendPartyResult(client, "", PartyCommand.PARTY_OP_INVITE, PartyCommandResult.INVITE_NOT_FOUND);
         }
@@ -730,7 +745,7 @@ public class WcHandlersGroup
         }
         else
         {
-            var tmp = _clusterServiceLocator.WorldCluster.CharacteRs;
+            var tmp = cluster.CharacteRs;
             var argobjCharacter = tmp[guid];
             client.Character.Group.SetLeader(argobjCharacter);
             tmp[guid] = argobjCharacter;
@@ -739,13 +754,13 @@ public class WcHandlersGroup
 
     public void On_CMSG_GROUP_RAID_CONVERT(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_RAID_CONVERT", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_RAID_CONVERT", client.IP, client.Port);
         if (client.Character.IsInGroup)
         {
             SendPartyResult(client, "", PartyCommand.PARTY_OP_INVITE, PartyCommandResult.INVITE_OK);
             client.Character.Group.ConvertToRaid();
             client.Character.Group.SendGroupList();
-            _clusterServiceLocator.WcNetwork.WorldServer.GroupSendUpdate(client.Character.Group.Id);
+            network.WorldServer.GroupSendUpdate(client.Character.Group.Id);
         }
     }
 
@@ -764,12 +779,12 @@ public class WcHandlersGroup
         }
 
         var subGroup = packet.GetInt8();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_CHANGE_SUB_GROUP [{2}:{3}]", client.IP, client.Port, name, subGroup);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_CHANGE_SUB_GROUP [{2}:{3}]", client.IP, client.Port, name, subGroup);
         if (client.Character.IsInGroup)
         {
             int j;
-            var loopTo = ((subGroup + 1) * _clusterServiceLocator.GlobalConstants.GROUP_SUBGROUPSIZE) - 1;
-            for (j = subGroup * _clusterServiceLocator.GlobalConstants.GROUP_SUBGROUPSIZE; j <= loopTo; j++)
+            var loopTo = ((subGroup + 1) * MangosGlobalConstants.GROUP_SUBGROUPSIZE) - 1;
+            for (j = subGroup * MangosGlobalConstants.GROUP_SUBGROUPSIZE; j <= loopTo; j++)
             {
                 if (client.Character.Group.Members[j] is null)
                 {
@@ -810,7 +825,7 @@ public class WcHandlersGroup
         }
 
         var name2 = packet.GetString();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_SWAP_SUB_GROUP [{2}:{3}]", client.IP, client.Port, name1, name2);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GROUP_SWAP_SUB_GROUP [{2}:{3}]", client.IP, client.Port, name1, name2);
         if (client.Character.IsInGroup)
         {
             int j;
@@ -857,7 +872,7 @@ public class WcHandlersGroup
         var method = packet.GetInt32();
         var master = packet.GetUInt64();
         var threshold = packet.GetInt32();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_LOOT_METHOD [Method={2}, Master=0x{3:X}, Threshold={4}]", client.IP, client.Port, method, master, threshold);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_LOOT_METHOD [Method={2}, Master=0x{3:X}, Threshold={4}]", client.IP, client.Port, method, master, threshold);
         if (!client.Character.IsGroupLeader)
         {
             return;
@@ -867,7 +882,7 @@ public class WcHandlersGroup
         client.Character.Group.LootMethod = (GroupLootMethod)method;
         client.Character.Group.LootThreshold = (GroupLootThreshold)threshold;
         client.Character.Group.SendGroupList();
-        _clusterServiceLocator.WcNetwork.WorldServer.GroupSendUpdateLoot(client.Character.Group.Id);
+        network.WorldServer.GroupSendUpdateLoot(client.Character.Group.Id);
     }
 
     public void On_MSG_MINIMAP_PING(PacketClass packet, ClientClass client)
@@ -875,7 +890,7 @@ public class WcHandlersGroup
         packet.GetInt16();
         var x = packet.GetFloat();
         var y = packet.GetFloat();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] MSG_MINIMAP_PING [{2}:{3}]", client.IP, client.Port, x, y);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] MSG_MINIMAP_PING [{2}:{3}]", client.IP, client.Port, x, y);
         if (client.Character.IsInGroup)
         {
             PacketClass response = new(Opcodes.MSG_MINIMAP_PING);
@@ -897,11 +912,11 @@ public class WcHandlersGroup
         packet.GetInt16();
         var minRoll = packet.GetInt32();
         var maxRoll = packet.GetInt32();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] MSG_RANDOM_ROLL [min={2} max={3}]", client.IP, client.Port, minRoll, maxRoll);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] MSG_RANDOM_ROLL [min={2} max={3}]", client.IP, client.Port, minRoll, maxRoll);
         PacketClass response = new(Opcodes.MSG_RANDOM_ROLL);
         response.AddInt32(minRoll);
         response.AddInt32(maxRoll);
-        response.AddInt32(_clusterServiceLocator.WorldCluster.Rnd.Next(minRoll, maxRoll));
+        response.AddInt32(cluster.Rnd.Next(minRoll, maxRoll));
         response.AddUInt64(client.Character.Guid);
         if (client.Character.IsInGroup)
         {
@@ -917,7 +932,7 @@ public class WcHandlersGroup
 
     public void On_MSG_RAID_READY_CHECK(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] MSG_RAID_READY_CHECK", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] MSG_RAID_READY_CHECK", client.IP, client.Port);
         if (client.Character.IsGroupLeader)
         {
             client.Character.Group.BroadcastToOther(packet, client.Character);
@@ -1014,25 +1029,25 @@ public class WcHandlersGroup
 
         packet.GetInt16();
         var guid = packet.GetUInt64();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_REQUEST_PARTY_MEMBER_STATS [{2:X}]", client.IP, client.Port, guid);
-        if (!_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid))
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_REQUEST_PARTY_MEMBER_STATS [{2:X}]", client.IP, client.Port, guid);
+        if (!cluster.CharacteRs.ContainsKey(guid))
         {
             // Character is offline
-            var response = _clusterServiceLocator.Functions.BuildPartyMemberStatsOffline(guid);
+            var response = GlobalFunctions.BuildPartyMemberStatsOffline(guid);
             client.Send(response);
             response.Dispose();
         }
-        else if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].IsInWorld == false)
+        else if (cluster.CharacteRs[guid].IsInWorld == false)
         {
             // Character is offline (not in world)
-            var response = _clusterServiceLocator.Functions.BuildPartyMemberStatsOffline(guid);
+            var response = GlobalFunctions.BuildPartyMemberStatsOffline(guid);
             client.Send(response);
             response.Dispose();
         }
         else
         {
             // Request information from WorldServer
-            PacketClass response = new(0) { Data = _clusterServiceLocator.WorldCluster.CharacteRs[guid].GetWorld.GroupMemberStats(guid, 0) };
+            PacketClass response = new(0) { Data = cluster.CharacteRs[guid].GetWorld.GroupMemberStats(guid, 0) };
             client.Send(response);
             response.Dispose();
         }

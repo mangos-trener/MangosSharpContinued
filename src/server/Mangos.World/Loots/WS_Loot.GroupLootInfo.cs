@@ -18,7 +18,7 @@
 
 using Mangos.Common.Globals;
 using Mangos.World.Globals;
-using Mangos.World.Objects;
+using Mangos.World.Objects.Factories;
 using Mangos.World.Player;
 using System.Collections.Generic;
 using System.Threading;
@@ -35,16 +35,19 @@ public partial class WS_Loot
 
         public LootItem Item;
 
-        public List<WS_PlayerData.CharacterObject> Rolls;
+        public List<CharacterObject> Rolls;
 
-        public Dictionary<WS_PlayerData.CharacterObject, int> Looters;
+        public Dictionary<CharacterObject, int> Looters;
 
         public Timer RollTimeoutTimer;
+        private readonly ItemObjectFactory itemObjectFactory;
 
-        public GroupLootInfo()
+        public GroupLootInfo(ItemObjectFactory itemObjectFactory)
         {
-            Rolls = new List<WS_PlayerData.CharacterObject>();
-            Looters = new Dictionary<WS_PlayerData.CharacterObject, int>(5);
+            this.itemObjectFactory = itemObjectFactory;
+
+            Rolls = new List<CharacterObject>();
+            Looters = new Dictionary<CharacterObject, int>(5);
             RollTimeoutTimer = null;
         }
 
@@ -79,7 +82,7 @@ public partial class WS_Loot
                 response2.Dispose();
                 return;
             }
-            WS_PlayerData.CharacterObject looterCharacter = null;
+            CharacterObject looterCharacter = null;
             checked
             {
                 var maxRoll = -1;
@@ -87,7 +90,7 @@ public partial class WS_Loot
                 {
                     if (looter.Value == maxRollType)
                     {
-                        var rollValue = (byte)WorldServiceLocator.WorldServer.Rnd.Next(0, 100);
+                        var rollValue = (byte)WorldState.Rnd.Next(0, 100);
                         if (rollValue > maxRoll)
                         {
                             maxRoll = rollValue;
@@ -106,10 +109,8 @@ public partial class WS_Loot
                         response.Dispose();
                     }
                 }
-                ItemObject itemObject = new(Item.ItemID, looterCharacter.GUID)
-                {
-                    StackCount = Item.ItemCount
-                };
+
+                var itemObject = itemObjectFactory.Create(Item.ItemID, looterCharacter.GUID, Item.ItemCount);
                 var tmpItem = itemObject;
                 Packets.PacketClass wonItem = new(Opcodes.SMSG_LOOT_ROLL_WON);
                 wonItem.AddUInt64(LootObject.GUID);

@@ -18,6 +18,8 @@
 
 using Mangos.Common.Enums.GameObject;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy.Globals;
+using Mangos.World.Network;
 using Mangos.World.Objects;
 using Mangos.World.Player;
 using Microsoft.VisualBasic.CompilerServices;
@@ -35,11 +37,15 @@ public partial class Packets
         public Hashtable UpdateData;
 
         private bool _disposedValue;
+        private readonly WorldState worldState;
+        private readonly WS_Network network;
 
-        public UpdateClass(int max)
+        public UpdateClass(WorldState worldState, WS_Network network, int max)
         {
             UpdateData = new Hashtable();
             UpdateMask = new BitArray(max, defaultValue: false);
+            this.worldState = worldState;
+            this.network = network;
         }
 
         public void SetUpdateFlag(int pos, int value)
@@ -105,18 +111,18 @@ public partial class Packets
                 {
                     packet.AddInt8(112);
                     packet.AddInt32(8388608);
-                    packet.AddInt32(WorldServiceLocator.WSNetwork.MsTime());
+                    packet.AddInt32(network.MsTime());
                     packet.AddSingle(updateObject.positionX);
                     packet.AddSingle(updateObject.positionY);
                     packet.AddSingle(updateObject.positionZ);
                     packet.AddSingle(updateObject.orientation);
                     packet.AddSingle(0f);
-                    packet.AddSingle(WorldServiceLocator.WorldServer.CREATURESDatabase[updateObject.ID].WalkSpeed);
-                    packet.AddSingle(WorldServiceLocator.WorldServer.CREATURESDatabase[updateObject.ID].RunSpeed);
-                    packet.AddSingle(WorldServiceLocator.GlobalConstants.UNIT_NORMAL_SWIM_BACK_SPEED);
-                    packet.AddSingle(WorldServiceLocator.GlobalConstants.UNIT_NORMAL_SWIM_SPEED);
-                    packet.AddSingle(WorldServiceLocator.GlobalConstants.UNIT_NORMAL_WALK_BACK_SPEED);
-                    packet.AddSingle(WorldServiceLocator.GlobalConstants.UNIT_NORMAL_TURN_RATE);
+                    packet.AddSingle(worldState.CreaturesDatabase[updateObject.ID].WalkSpeed);
+                    packet.AddSingle(worldState.CreaturesDatabase[updateObject.ID].RunSpeed);
+                    packet.AddSingle(MangosGlobalConstants.UNIT_NORMAL_SWIM_BACK_SPEED);
+                    packet.AddSingle(MangosGlobalConstants.UNIT_NORMAL_SWIM_SPEED);
+                    packet.AddSingle(MangosGlobalConstants.UNIT_NORMAL_WALK_BACK_SPEED);
+                    packet.AddSingle(MangosGlobalConstants.UNIT_NORMAL_TURN_RATE);
                     packet.AddUInt32(1u);
                 }
                 if (updateType is ObjectUpdateType.UPDATETYPE_CREATE_OBJECT or ObjectUpdateType.UPDATETYPE_VALUES)
@@ -160,7 +166,7 @@ public partial class Packets
             }
         }
 
-        public void AddToPacket(ref PacketClass packet, ObjectUpdateType updateType, ref WS_PlayerData.CharacterObject updateObject)
+        public void AddToPacket(ref PacketClass packet, ObjectUpdateType updateType, ref CharacterObject updateObject)
         {
             packet.AddInt8(checked((byte)updateType));
             packet.AddPackGUID(updateObject.GUID);
@@ -177,7 +183,7 @@ public partial class Packets
                 }
                 packet.AddInt8(112);
                 packet.AddInt32(flags2);
-                packet.AddInt32(WorldServiceLocator.WSNetwork.MsTime());
+                packet.AddInt32(network.MsTime());
                 packet.AddSingle(updateObject.positionX);
                 packet.AddSingle(updateObject.positionY);
                 packet.AddSingle(updateObject.positionZ);
@@ -197,7 +203,7 @@ public partial class Packets
                 packet.AddSingle(updateObject.SwimSpeed);
                 packet.AddSingle(updateObject.SwimBackSpeed);
                 packet.AddSingle(updateObject.TurnRate);
-                packet.AddUInt32(WorldServiceLocator.CommonGlobalFunctions.GuidLow(updateObject.GUID));
+                packet.AddUInt32(LegacyGlobalFunctions.GuidLow(updateObject.GUID));
             }
             checked
             {
@@ -250,7 +256,7 @@ public partial class Packets
                 packet.AddPackGUID(updateObject.GUID);
                 if (updateType == ObjectUpdateType.UPDATETYPE_CREATE_OBJECT)
                 {
-                    if (WorldServiceLocator.WorldServer.ITEMDatabase[updateObject.ItemEntry].ContainerSlots > 0)
+                    if (worldState.ItemDatabase[updateObject.ItemEntry].ContainerSlots > 0)
                     {
                         packet.AddInt8(2);
                     }
@@ -302,7 +308,7 @@ public partial class Packets
             }
         }
 
-        public void AddToPacket(ref PacketClass packet, ObjectUpdateType updateType, ref WS_GameObjects.GameObject updateObject)
+        public void AddToPacket(ref PacketClass packet, ObjectUpdateType updateType, ref GameObject updateObject)
         {
             checked
             {
@@ -342,10 +348,10 @@ public partial class Packets
                         packet.AddSingle(updateObject.positionZ);
                         packet.AddSingle(updateObject.orientation);
                     }
-                    packet.AddUInt32(WorldServiceLocator.CommonGlobalFunctions.GuidHigh(updateObject.GUID));
+                    packet.AddUInt32(LegacyGlobalFunctions.GuidHigh(updateObject.GUID));
                     if (updateObject.Type is GameObjectType.GAMEOBJECT_TYPE_TRANSPORT or GameObjectType.GAMEOBJECT_TYPE_MO_TRANSPORT)
                     {
-                        packet.AddInt32(WorldServiceLocator.WSNetwork.MsTime());
+                        packet.AddInt32(network.MsTime());
                     }
                 }
                 if (updateType is ObjectUpdateType.UPDATETYPE_CREATE_OBJECT or ObjectUpdateType.UPDATETYPE_CREATE_OBJECT_SELF or ObjectUpdateType.UPDATETYPE_VALUES)

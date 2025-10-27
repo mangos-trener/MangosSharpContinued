@@ -23,11 +23,22 @@ using Mangos.Common.Enums.Misc;
 using Mangos.Common.Enums.Player;
 using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
+using Mangos.Common.Legacy.Globals;
+using Mangos.Configuration;
+using Mangos.World.DataStores;
 using Mangos.World.Globals;
 using Mangos.World.Network;
 using Mangos.World.Objects;
+using Mangos.World.Objects.Factories;
+using Mangos.World.Objects.Factories.Packets;
+using Mangos.World.Objects.Factories.Spells;
 using Mangos.World.Player;
+using Mangos.World.Server;
+using Mangos.World.Services;
 using Mangos.World.Spells;
+using Mangos.World.Weather;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
@@ -47,9 +58,7 @@ public class WS_Commands
     public class ChatCommand
     {
         public string CommandHelp;
-
         public AccessLevel CommandAccess;
-
         public ChatCommandDelegate CommandDelegate;
 
         public ChatCommand()
@@ -58,17 +67,77 @@ public class WS_Commands
         }
     }
 
-    public delegate bool ChatCommandDelegate(ref WS_PlayerData.CharacterObject objCharacter, string Message);
+    public delegate bool ChatCommandDelegate(ref CharacterObject objCharacter, string Message);
 
     public const ulong SystemGUID = 2147483647uL;
 
     public const string SystemNAME = "System";
-
     public Dictionary<string, ChatCommand> ChatCommands;
+    private readonly ILogger<WS_Commands> logger;
+    private readonly ICluster cluster;
+    private readonly MangosConfiguration configuration;
+    private readonly WorldState worldState;
+    private readonly CharacterDatabase characterDatabase;
+    private readonly WorldDatabase worldDatabase;
+    private readonly AccountDatabase accountDatabase;
+    private readonly WS_DBCDatabase database;
 
-    public WS_Commands()
+    // DI
+    private readonly WS_GameObjects _gameObjects;
+    private readonly WS_TimerBasedEvents _timerBasedEvents;
+    private readonly ItemObjectFactory itemObjectFactory;
+    private readonly WS_Player_Initializator playerInitializator;
+    private readonly ICellUpdater cellUpdater;
+    private readonly ICharacterResurrectionService characterResurrectionService;
+    private readonly CreatureObjectFactory creatureObjectFactory;
+    private readonly GameObjectFactory gameObjectFactory;
+    private readonly SpellTargetsFactory spellTargetsFactory;
+    private readonly CastSpellParametersFactory castSpellParametersFactory;
+    private readonly UpdateClassFactory updateClassFactory;
+
+    public WS_Commands(
+        ILogger<WS_Commands> logger,
+        ICluster cluster,
+        MangosConfiguration configuration,
+        WorldState worldState,
+        CharacterDatabase characterDatabase,
+        WorldDatabase worldDatabase,
+        AccountDatabase accountDatabase,
+        WS_DBCDatabase database,
+        WS_GameObjects gameObjects,
+        WS_TimerBasedEvents timerBasedEvents,
+        ItemObjectFactory itemObjectFactory,
+        WS_Player_Initializator playerInitializator,
+        ICellUpdater cellUpdater,
+        ICharacterResurrectionService characterResurrectionService,
+        CreatureObjectFactory creatureObjectFactory,
+        GameObjectFactory gameObjectFactory,
+        SpellTargetsFactory spellTargetsFactory,
+        CastSpellParametersFactory castSpellParametersFactory,
+        UpdateClassFactory updateClassFactory)
     {
         ChatCommands = new Dictionary<string, ChatCommand>();
+        this.logger = logger;
+        this.cluster = cluster;
+        this.configuration = configuration;
+        this.worldState = worldState;
+        this.characterDatabase = characterDatabase;
+        this.worldDatabase = worldDatabase;
+        this.accountDatabase = accountDatabase;
+        this.database = database;
+        _gameObjects = gameObjects;
+        _timerBasedEvents = timerBasedEvents;
+        this.itemObjectFactory = itemObjectFactory;
+        this.playerInitializator = playerInitializator;
+        this.cellUpdater = cellUpdater;
+        this.characterResurrectionService = characterResurrectionService;
+        this.creatureObjectFactory = creatureObjectFactory;
+        this.gameObjectFactory = gameObjectFactory;
+        this.spellTargetsFactory = spellTargetsFactory;
+        this.castSpellParametersFactory = castSpellParametersFactory;
+        this.updateClassFactory = updateClassFactory;
+
+        RegisterChatCommands();
     }
 
     public void RegisterChatCommands()
@@ -88,10 +157,19 @@ public class WS_Commands
                         {
                             CommandHelp = info.GetcmdHelp,
                             CommandAccess = info.GetcmdAccess,
-                            CommandDelegate = (ChatCommandDelegate)Delegate.CreateDelegate(typeof(ChatCommandDelegate), WorldServiceLocator.WSCommands, tmpMethod)
                         };
+
+                        try
+                        {
+                            chatCommand.CommandDelegate =
+                                (ChatCommandDelegate)Delegate.CreateDelegate(typeof(ChatCommandDelegate), this, tmpMethod);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Failed to bind command '{tmpMethod.DeclaringType.Name}.{tmpMethod.Name}': {ex.Message}");
+                        }
                         var cmd = chatCommand;
-                        ChatCommands.Add(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(info.GetcmdName), cmd);
+                        ChatCommands.Add(StringFormatFunctions.UppercaseFirstLetter(info.GetcmdName), cmd);
                     }
                 }
             }
@@ -104,46 +182,51 @@ public class WS_Commands
         {
             var tmp = Strings.Split(Message, " ", 2);
             ChatCommand Command = null;
-            if (ChatCommands.ContainsKey(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(tmp[0])))
+            if (ChatCommands.ContainsKey(StringFormatFunctions.UppercaseFirstLetter(tmp[0])))
             {
-                Command = ChatCommands[WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(tmp[0])];
+                Command = ChatCommands[StringFormatFunctions.UppercaseFirstLetter(tmp[0])];
             }
+
             var Arguments = "";
             if (tmp.Length == 2)
             {
                 Arguments = Strings.Trim(tmp[1]);
             }
+
             var Name = client.Character.Name;
             if (Command == null)
             {
                 client.Character.CommandResponse("Unknown command.");
                 return;
             }
+
             if (Command.CommandAccess > client.Character.Access)
             {
                 client.Character.CommandResponse("This command is not available for your access level.");
                 return;
             }
+
             if (!Command.CommandDelegate(ref client.Character, Arguments))
             {
                 client.Character.CommandResponse(Command.CommandHelp);
                 return;
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.USER, "[{0}:{1}] {2} used command: {3}", client.IP, client.Port, Name, Message);
+
+            logger.LogInformation("[{0}:{1}] {2} used command: {3}", client.IP, client.Port, Name, Message);
         }
         catch (Exception err)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "[{0}:{1}] Client command caused error! {3}{2}", client.IP, client.Port, err.ToString(), Environment.NewLine);
+            logger.LogError("[{0}:{1}] Client command caused error! {3}{2}", client.IP, client.Port, err.ToString(), Environment.NewLine);
             client.Character.CommandResponse(string.Format("Your command caused error:" + Environment.NewLine + " [{0}]", err.Message));
         }
     }
 
     [ChatCommand("help", "help #command\\r\\nDisplays usage information about command, if no command specified - displays list of available commands.")]
-    public bool Help(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool Help(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Strings.Trim(Message), "", TextCompare: false) != 0)
         {
-            var Command2 = ChatCommands[Strings.Trim(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(Message))];
+            var Command2 = ChatCommands[Strings.Trim(StringFormatFunctions.UppercaseFirstLetter(Message))];
             switch (Command2)
             {
                 case null:
@@ -169,7 +252,7 @@ public class WS_Commands
             {
                 if (Command.Value.CommandAccess <= objCharacter.Access)
                 {
-                    cmdList = cmdList + WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(Command.Key) + Environment.NewLine;
+                    cmdList = cmdList + StringFormatFunctions.UppercaseFirstLetter(Command.Key) + Environment.NewLine;
                 }
             }
             cmdList = cmdList + Environment.NewLine + "Use help #command for usage information about particular command.";
@@ -179,7 +262,7 @@ public class WS_Commands
     }
 
     [ChatCommand("castspell", "castspell #spellid #target - Selected unit will start casting spell. Target can be ME or SELF.", AccessLevel.Developer)]
-    public bool cmdCastSpellMe(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdCastSpellMe(ref CharacterObject objCharacter, string Message)
     {
         var tmp = Strings.Split(Message, " ", 2);
         if (tmp.Length < 2)
@@ -187,41 +270,41 @@ public class WS_Commands
             return false;
         }
         var SpellID = Conversions.ToInteger(tmp[0]);
-        var Target = WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(tmp[1]);
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        var Target = StringFormatFunctions.UppercaseFirstLetter(tmp[1]);
+        if (LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
             if (Operators.CompareString(Target, "ME", TextCompare: false) != 0)
             {
                 if (Operators.CompareString(Target, "SELF", TextCompare: false) == 0)
                 {
-                    WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].CastSpell(SpellID, WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID]);
+                    worldState.WorldCreatures[objCharacter.TargetGUID].CastSpell(SpellID, worldState.WorldCreatures[objCharacter.TargetGUID]);
                 }
             }
             else
             {
-                WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].CastSpell(SpellID, objCharacter);
+                worldState.WorldCreatures[objCharacter.TargetGUID].CastSpell(SpellID, objCharacter);
             }
         }
-        else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        else if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             if (Operators.CompareString(Target, "ME", TextCompare: false) != 0)
             {
                 if (Operators.CompareString(Target, "SELF", TextCompare: false) == 0)
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].CastOnSelf(SpellID);
+                    worldState.Characters[objCharacter.TargetGUID].CastOnSelf(SpellID);
                 }
             }
             else
             {
-                WS_Spells.SpellTargets Targets = new();
+                var Targets = spellTargetsFactory.Create();
                 WS_Base.BaseUnit objCharacter2 = objCharacter;
                 Targets.SetTarget_UNIT(ref objCharacter2);
-                objCharacter = (WS_PlayerData.CharacterObject)objCharacter2;
+                objCharacter = (CharacterObject)objCharacter2;
                 ulong targetGUID;
-                Dictionary<ulong, WS_PlayerData.CharacterObject> cHARACTERs;
-                WS_Base.BaseObject Caster = (cHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[targetGUID = objCharacter.TargetGUID];
-                cHARACTERs[targetGUID] = (WS_PlayerData.CharacterObject)Caster;
-                WS_Spells.CastSpellParameters castParams = new(ref Targets, ref Caster, SpellID);
+                Dictionary<ulong, CharacterObject> cHARACTERs;
+                WS_Base.BaseObject Caster = (cHARACTERs = worldState.Characters)[targetGUID = objCharacter.TargetGUID];
+                cHARACTERs[targetGUID] = (CharacterObject)Caster;
+                var castParams = castSpellParametersFactory.Create(ref Targets, ref Caster, SpellID);
                 ThreadPool.QueueUserWorkItem(callBack: castParams.Cast);
             }
         }
@@ -233,11 +316,11 @@ public class WS_Commands
     }
 
     [ChatCommand("control", "control - Takes or removes control over the selected unit.", AccessLevel.Admin)]
-    public bool cmdControl(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdControl(ref CharacterObject objCharacter, string Message)
     {
         if (objCharacter.MindControl != null)
         {
-            if (objCharacter.MindControl is WS_PlayerData.CharacterObject @object)
+            if (objCharacter.MindControl is CharacterObject @object)
             {
                 Packets.PacketClass packet1 = new(Opcodes.SMSG_DEATH_NOTIFY_OBSOLETE);
                 packet1.AddPackGUID(objCharacter.MindControl.GUID);
@@ -258,23 +341,23 @@ public class WS_Commands
             objCharacter.CommandResponse("Removed control over the unit.");
             return true;
         }
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             Packets.PacketClass packet2 = new(Opcodes.SMSG_DEATH_NOTIFY_OBSOLETE);
             packet2.AddPackGUID(objCharacter.TargetGUID);
             packet2.AddInt8(0);
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].client.Send(ref packet2);
+            worldState.Characters[objCharacter.TargetGUID].client.Send(ref packet2);
             packet2.Dispose();
-            objCharacter.MindControl = WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID];
+            objCharacter.MindControl = worldState.Characters[objCharacter.TargetGUID];
         }
         else
         {
-            if (!WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) || !WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+            if (!LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) || !worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
             {
                 objCharacter.CommandResponse("You need a target.");
                 return true;
             }
-            objCharacter.MindControl = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID];
+            objCharacter.MindControl = worldState.WorldCreatures[objCharacter.TargetGUID];
         }
         Packets.PacketClass packet3 = new(Opcodes.SMSG_DEATH_NOTIFY_OBSOLETE);
         packet3.AddPackGUID(objCharacter.TargetGUID);
@@ -290,41 +373,41 @@ public class WS_Commands
     }
 
     [ChatCommand("createguild", "createguild #guildname - Creates a guild.", AccessLevel.Developer)]
-    public bool cmdCreateGuild(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdCreateGuild(ref CharacterObject objCharacter, string Message)
     {
         return true;
     }
 
     [ChatCommand("cast", "cast #spellid - You will start casting spell on selected target.", AccessLevel.Developer)]
-    public bool cmdCastSpell(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdCastSpell(ref CharacterObject objCharacter, string Message)
     {
         var tmp = Strings.Split(Message, " ", 2);
         var SpellID = Conversions.ToInteger(tmp[0]);
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
-            WS_Spells.SpellTargets Targets2 = new();
+            var Targets2 = spellTargetsFactory.Create();
             ulong targetGUID;
             Dictionary<ulong, WS_Creatures.CreatureObject> wORLD_CREATUREs;
-            WS_Base.BaseUnit objCharacter2 = (wORLD_CREATUREs = WorldServiceLocator.WorldServer.WORLD_CREATUREs)[targetGUID = objCharacter.TargetGUID];
+            WS_Base.BaseUnit objCharacter2 = (wORLD_CREATUREs = worldState.WorldCreatures)[targetGUID = objCharacter.TargetGUID];
             Targets2.SetTarget_UNIT(ref objCharacter2);
             wORLD_CREATUREs[targetGUID] = (WS_Creatures.CreatureObject)objCharacter2;
             WS_Base.BaseObject Caster = objCharacter;
-            objCharacter = (WS_PlayerData.CharacterObject)Caster;
-            ThreadPool.QueueUserWorkItem(new WS_Spells.CastSpellParameters(ref Targets2, ref Caster, SpellID).Cast);
-            objCharacter.CommandResponse("You are now casting [" + Conversions.ToString(SpellID) + "] at [" + WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].Name + "].");
+            objCharacter = (CharacterObject)Caster;
+            ThreadPool.QueueUserWorkItem(castSpellParametersFactory.Create(ref Targets2, ref Caster, SpellID).Cast);
+            objCharacter.CommandResponse("You are now casting [" + Conversions.ToString(SpellID) + "] at [" + worldState.WorldCreatures[objCharacter.TargetGUID].Name + "].");
         }
-        else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        else if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WS_Spells.SpellTargets Targets = new();
-            Dictionary<ulong, WS_PlayerData.CharacterObject> cHARACTERs;
+            var Targets = spellTargetsFactory.Create();
+            Dictionary<ulong, CharacterObject> cHARACTERs;
             ulong targetGUID;
-            WS_Base.BaseUnit objCharacter2 = (cHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[targetGUID = objCharacter.TargetGUID];
+            WS_Base.BaseUnit objCharacter2 = (cHARACTERs = worldState.Characters)[targetGUID = objCharacter.TargetGUID];
             Targets.SetTarget_UNIT(ref objCharacter2);
-            cHARACTERs[targetGUID] = (WS_PlayerData.CharacterObject)objCharacter2;
+            cHARACTERs[targetGUID] = (CharacterObject)objCharacter2;
             WS_Base.BaseObject Caster = objCharacter;
-            objCharacter = (WS_PlayerData.CharacterObject)Caster;
-            ThreadPool.QueueUserWorkItem(new WS_Spells.CastSpellParameters(ref Targets, ref Caster, SpellID).Cast);
-            objCharacter.CommandResponse("You are now casting [" + Conversions.ToString(SpellID) + "] at [" + WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Name + "].");
+            objCharacter = (CharacterObject)Caster;
+            ThreadPool.QueueUserWorkItem(castSpellParametersFactory.Create(ref Targets, ref Caster, SpellID).Cast);
+            objCharacter.CommandResponse("You are now casting [" + Conversions.ToString(SpellID) + "] at [" + worldState.Characters[objCharacter.TargetGUID].Name + "].");
         }
         else
         {
@@ -334,12 +417,12 @@ public class WS_Commands
     }
 
     [ChatCommand("save", "save - Saves selected character.", AccessLevel.Developer)]
-    public bool cmdSave(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSave(ref CharacterObject objCharacter, string Message)
     {
-        if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) != 0 && WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID))
+        if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) != 0 && LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Save();
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].CommandResponse($"Character {WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Name} saved.");
+            worldState.Characters[objCharacter.TargetGUID].Save();
+            worldState.Characters[objCharacter.TargetGUID].CommandResponse($"Character {worldState.Characters[objCharacter.TargetGUID].Name} saved.");
         }
         else
         {
@@ -350,17 +433,17 @@ public class WS_Commands
     }
 
     [ChatCommand("spawndata", "spawndata - Tells you the spawn in memory information.", AccessLevel.Developer)]
-    public bool cmdSpawns(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSpawns(ref CharacterObject objCharacter, string Message)
     {
         objCharacter.CommandResponse("Spawns loaded in server memory:");
         objCharacter.CommandResponse("-------------------------------");
-        objCharacter.CommandResponse("Creatures: " + Conversions.ToString(WorldServiceLocator.WorldServer.WORLD_CREATUREs.Count));
-        objCharacter.CommandResponse("GameObjects: " + Conversions.ToString(WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs.Count));
+        objCharacter.CommandResponse("Creatures: " + Conversions.ToString(worldState.WorldCreatures.Count));
+        objCharacter.CommandResponse("GameObjects: " + Conversions.ToString(worldState.WorldGameObjects.Count));
         return true;
     }
 
     [ChatCommand("gobjectnear", "gobjectnear - Tells you the near objects count.", AccessLevel.Developer)]
-    public bool cmdNear(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdNear(ref CharacterObject objCharacter, string Message)
     {
         objCharacter.CommandResponse("Near objects:");
         objCharacter.CommandResponse("-------------------------------");
@@ -374,44 +457,45 @@ public class WS_Commands
     }
 
     [ChatCommand("npcai", "npcai #enable/disable - Enables/Disables  Creature AI updating.", AccessLevel.Developer)]
-    public bool cmdAI(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdAI(ref CharacterObject objCharacter, string Message)
     {
-        if (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(Message), "ENABLE", TextCompare: false) == 0)
+        if (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(Message), "ENABLE", TextCompare: false) == 0)
         {
-            WorldServiceLocator.WSTimerBasedEvents.AIManager.AIManagerTimer.Change(1000, 1000);
+            _timerBasedEvents.AIManager.AIManagerTimer.Change(1000, 1000);
             objCharacter.CommandResponse("AI is enabled.");
         }
         else
         {
-            if (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(Message), "DISABLE", TextCompare: false) != 0)
+            if (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(Message), "DISABLE", TextCompare: false) != 0)
             {
                 return false;
             }
-            WorldServiceLocator.WSTimerBasedEvents.AIManager.AIManagerTimer.Change(-1, -1);
+
+            _timerBasedEvents.AIManager.AIManagerTimer.Change(-1, -1);
             objCharacter.CommandResponse("AI is disabled.");
         }
         return true;
     }
 
     [ChatCommand("npcaistate", "npcaistate - Shows debug information about AI state of selected creature.", AccessLevel.Developer)]
-    public bool cmdAIState(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdAIState(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return false;
         }
-        if (!WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        if (!worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
             objCharacter.CommandResponse("Selected target is not creature!");
             return false;
         }
-        if (WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].aiScript == null)
+        if (worldState.WorldCreatures[objCharacter.TargetGUID].aiScript == null)
         {
             objCharacter.CommandResponse("This creature doesn't have AI");
             return false;
         }
-        var creatureObject = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID];
+        var creatureObject = worldState.WorldCreatures[objCharacter.TargetGUID];
         objCharacter.CommandResponse(string.Format("Information for creature [{0}]:{1}ai = {2}{1}state = {3}{1}maxdist = {4}", creatureObject.Name, Environment.NewLine, creatureObject.aiScript, creatureObject.aiScript.State.ToString(), creatureObject.MaxDistance));
         objCharacter.CommandResponse("Hate table:");
         foreach (var u in creatureObject.aiScript.aiHateTable)
@@ -423,7 +507,7 @@ public class WS_Commands
     }
 
     [ChatCommand("notifymessage", "notify #message - Send text message to all players on the server.")]
-    public bool cmdNotificationMessage(ref WS_PlayerData.CharacterObject objCharacter, string Text)
+    public bool cmdNotificationMessage(ref CharacterObject objCharacter, string Text)
     {
         if (Operators.CompareString(Text, "", TextCompare: false) == 0)
         {
@@ -432,13 +516,13 @@ public class WS_Commands
         Packets.PacketClass packet = new(Opcodes.SMSG_NOTIFICATION);
         packet.AddString(Text);
         packet.UpdateLength();
-        WorldServiceLocator.WorldServer.ClsWorldServer.Cluster.Broadcast(packet.Data);
+        cluster.Broadcast(packet.Data);
         packet.Dispose();
         return true;
     }
 
     [ChatCommand("nullchar", " - Set's Character Object to Null, forcing an NullReferenceException to throw on actions peformed after issuing this command.", AccessLevel.Developer)]
-    public bool cmdNullChar(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdNullChar(ref CharacterObject objCharacter, string Message)
     {
         Thread.Sleep(5000);
         objCharacter = null;
@@ -450,21 +534,21 @@ public class WS_Commands
         PerformOverflow();
     }
     [ChatCommand("overflow", " - PH.", AccessLevel.Developer)]
-    public bool cmdOverflow(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdOverflow(ref CharacterObject objCharacter, string Message)
     {
         PerformOverflow();
         return true;
     }
 
     [ChatCommand("threadpoolexception", " - PH.", AccessLevel.Developer)]
-    public bool cmdThreadPoolException(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdThreadPoolException(ref CharacterObject objCharacter, string Message)
     {
         ThreadPool.QueueUserWorkItem(_ => throw new Exception());
         return true;
     }
 
     [ChatCommand("stresstest", " - Causes a huge CPU Spike, simulating very high load, leak situations.", AccessLevel.Developer)]
-    public bool cmdStressTest(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdStressTest(ref CharacterObject objCharacter, string Message)
     {
         var hexString = "XYZ";
         for (var i = 0; i < hexString.Length;)
@@ -476,7 +560,7 @@ public class WS_Commands
     }
 
     [ChatCommand("servermessage", "servermessage #type #text - Send text message to all players on the server.")]
-    public bool cmdServerMessage(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdServerMessage(ref CharacterObject objCharacter, string Message)
     {
         var tmp = Strings.Split(Message, " ", 2);
         if (tmp.Length != 2)
@@ -489,13 +573,13 @@ public class WS_Commands
         packet.AddInt32(Type);
         packet.AddString(Text);
         packet.UpdateLength();
-        WorldServiceLocator.WorldServer.ClsWorldServer.Cluster.Broadcast(packet.Data);
+        cluster.Broadcast(packet.Data);
         packet.Dispose();
         return true;
     }
 
     [ChatCommand("say", "say #text - Target NPC will say this.")]
-    public bool cmdSay(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSay(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
@@ -505,36 +589,36 @@ public class WS_Commands
         {
             return false;
         }
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].SendChatMessage(Message, ChatMsg.CHAT_MSG_MONSTER_SAY, LANGUAGES.LANG_GLOBAL, objCharacter.GUID);
+            worldState.WorldCreatures[objCharacter.TargetGUID].SendChatMessage(Message, ChatMsg.CHAT_MSG_MONSTER_SAY, LANGUAGES.LANG_GLOBAL, objCharacter.GUID);
             return true;
         }
         return false;
     }
 
     [ChatCommand("resetfactions", "resetfactions - Resets character reputation standings.", AccessLevel.Admin)]
-    public bool cmdResetFactions(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdResetFactions(ref CharacterObject objCharacter, string Message)
     {
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             ulong targetGUID;
-            Dictionary<ulong, WS_PlayerData.CharacterObject> Characters;
-            var objCharacter2 = (Characters = WorldServiceLocator.WorldServer.CHARACTERs)[targetGUID = objCharacter.TargetGUID];
-            WorldServiceLocator.WSPlayerInitializator.InitializeReputations(ref objCharacter2);
+            Dictionary<ulong, CharacterObject> Characters;
+            var objCharacter2 = (Characters = worldState.Characters)[targetGUID = objCharacter.TargetGUID];
+            playerInitializator.InitializeReputations(ref objCharacter2);
             Characters[targetGUID] = objCharacter2;
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SaveCharacter();
+            worldState.Characters[objCharacter.TargetGUID].SaveCharacter();
         }
         else
         {
-            WorldServiceLocator.WSPlayerInitializator.InitializeReputations(ref objCharacter);
+            playerInitializator.InitializeReputations(ref objCharacter);
             objCharacter.SaveCharacter();
         }
         return true;
     }
 
     [ChatCommand("skillmaster", "skillmaster - Get all spells and skills maxed out for your level.", AccessLevel.Developer)]
-    public bool cmdGetMax(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdGetMax(ref CharacterObject objCharacter, string Message)
     {
         checked
         {
@@ -549,28 +633,28 @@ public class WS_Commands
     }
 
     [ChatCommand("setlevel", "setlevel #level - Set the level of selected character.", AccessLevel.Developer)]
-    public bool cmdSetLevel(ref WS_PlayerData.CharacterObject objCharacter, string tLevel)
+    public bool cmdSetLevel(ref CharacterObject objCharacter, string tLevel)
     {
         if (!Versioned.IsNumeric(tLevel))
         {
             return false;
         }
         var Level = Conversions.ToInteger(tLevel);
-        if (Level > WorldServiceLocator.WSPlayerInitializator.DEFAULT_MAX_LEVEL)
+        if (Level > playerInitializator.DEFAULT_MAX_LEVEL)
         {
-            Level = WorldServiceLocator.WSPlayerInitializator.DEFAULT_MAX_LEVEL;
+            Level = playerInitializator.DEFAULT_MAX_LEVEL;
         }
-        if (!WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (!worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             objCharacter.CommandResponse("Target not found or not character.");
             return true;
         }
-        WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetLevel(checked((byte)Level));
+        worldState.Characters[objCharacter.TargetGUID].SetLevel(checked((byte)Level));
         return true;
     }
 
     [ChatCommand("addxp", "addxp #amount - Add X experience points to selected character.", AccessLevel.Developer)]
-    public bool cmdAddXP(ref WS_PlayerData.CharacterObject objCharacter, string tXP)
+    public bool cmdAddXP(ref CharacterObject objCharacter, string tXP)
     {
         if (!Versioned.IsNumeric(tXP))
         {
@@ -578,10 +662,10 @@ public class WS_Commands
         }
         checked
         {
-            if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+            if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
             {
                 var XP = Conversions.ToInteger(tXP);
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].AddXP(XP, 0);
+                worldState.Characters[objCharacter.TargetGUID].AddXP(XP, 0);
             }
             else
             {
@@ -592,7 +676,7 @@ public class WS_Commands
     }
 
     [ChatCommand("addrestedxp", "addrestedxp #amount - Add X rested bonus experience points to selected character.", AccessLevel.Developer)]
-    public bool cmdAddRestedXP(ref WS_PlayerData.CharacterObject objCharacter, string tXP)
+    public bool cmdAddRestedXP(ref CharacterObject objCharacter, string tXP)
     {
         if (!Versioned.IsNumeric(tXP))
         {
@@ -600,14 +684,14 @@ public class WS_Commands
         }
         checked
         {
-            if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+            if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
             {
                 var XP = Conversions.ToInteger(tXP);
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].RestBonus += XP;
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].RestState = XPSTATE.Rested;
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetUpdateFlag(1175, WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].RestBonus);
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetUpdateFlag(194, WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].cPlayerBytes2);
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SendCharacterUpdate();
+                worldState.Characters[objCharacter.TargetGUID].RestBonus += XP;
+                worldState.Characters[objCharacter.TargetGUID].RestState = XPSTATE.Rested;
+                worldState.Characters[objCharacter.TargetGUID].SetUpdateFlag(1175, worldState.Characters[objCharacter.TargetGUID].RestBonus);
+                worldState.Characters[objCharacter.TargetGUID].SetUpdateFlag(194, worldState.Characters[objCharacter.TargetGUID].cPlayerBytes2);
+                worldState.Characters[objCharacter.TargetGUID].SendCharacterUpdate();
             }
             else
             {
@@ -618,7 +702,7 @@ public class WS_Commands
     }
 
     [ChatCommand("playsound", "playsound - Plays a specific sound for every player around you.", AccessLevel.Developer)]
-    public bool cmdPlaySound(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdPlaySound(ref CharacterObject objCharacter, string Message)
     {
         if (!int.TryParse(Message, out var soundID))
         {
@@ -629,9 +713,9 @@ public class WS_Commands
     }
 
     [ChatCommand("combatlist", "combatlist - Lists everyone in your targets combatlist.", AccessLevel.Developer)]
-    public bool cmdCombatList(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdCombatList(ref CharacterObject objCharacter, string Message)
     {
-        var combatList = decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0 || !WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) ? objCharacter.inCombatWith.ToArray() : WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].inCombatWith.ToArray();
+        var combatList = decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0 || !LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) ? objCharacter.inCombatWith.ToArray() : worldState.Characters[objCharacter.TargetGUID].inCombatWith.ToArray();
         objCharacter.CommandResponse("Combat List (" + Conversions.ToString(combatList.Length) + "):");
         foreach (var Guid in combatList)
         {
@@ -641,19 +725,19 @@ public class WS_Commands
     }
 
     [ChatCommand("cooldownlist", "cooldownlist - Lists all cooldowns of your target.")]
-    public bool cmdCooldownList(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdCooldownList(ref CharacterObject objCharacter, string Message)
     {
         WS_Base.BaseUnit targetUnit = null;
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID))
         {
-            if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+            if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
             {
-                targetUnit = WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID];
+                targetUnit = worldState.Characters[objCharacter.TargetGUID];
             }
         }
-        else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        else if (LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
-            targetUnit = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID];
+            targetUnit = worldState.WorldCreatures[objCharacter.TargetGUID];
         }
         if (targetUnit == null)
         {
@@ -669,11 +753,11 @@ public class WS_Commands
         }
         switch (targetUnit)
         {
-            case WS_PlayerData.CharacterObject _:
+            case CharacterObject _:
                 {
                     var sCooldowns = "";
-                    var timeNow = WorldServiceLocator.Functions.GetTimestamp(DateAndTime.Now);
-                    foreach (var Spell in ((WS_PlayerData.CharacterObject)targetUnit).Spells)
+                    var timeNow = Globals.Functions.GetTimestamp(DateAndTime.Now);
+                    foreach (var Spell in ((CharacterObject)targetUnit).Spells)
                     {
                         if (Spell.Value.Cooldown != 0)
                         {
@@ -684,7 +768,7 @@ public class WS_Commands
                             }
                             if (timeLeft > 0L)
                             {
-                                sCooldowns = sCooldowns + "* Spell: " + Conversions.ToString(Spell.Key) + " - TimeLeft: " + WorldServiceLocator.Functions.GetTimeLeftString(timeLeft) + " sec - Item: " + Conversions.ToString(Spell.Value.CooldownItem) + Environment.NewLine;
+                                sCooldowns = sCooldowns + "* Spell: " + Conversions.ToString(Spell.Key) + " - TimeLeft: " + Globals.Functions.GetTimeLeftString(timeLeft) + " sec - Item: " + Conversions.ToString(Spell.Value.CooldownItem) + Environment.NewLine;
                             }
                         }
                     }
@@ -700,19 +784,19 @@ public class WS_Commands
     }
 
     [ChatCommand("clearcooldowns", "clearcooldowns - Clears all cooldowns of your target.", AccessLevel.Developer)]
-    public bool cmdClearCooldowns(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdClearCooldowns(ref CharacterObject objCharacter, string Message)
     {
         WS_Base.BaseUnit targetUnit = null;
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID))
         {
-            if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+            if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
             {
-                targetUnit = WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID];
+                targetUnit = worldState.Characters[objCharacter.TargetGUID];
             }
         }
-        else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        else if (LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID) && worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
-            targetUnit = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID];
+            targetUnit = worldState.WorldCreatures[objCharacter.TargetGUID];
         }
         if (targetUnit == null)
         {
@@ -720,17 +804,17 @@ public class WS_Commands
         }
         switch (targetUnit)
         {
-            case WS_PlayerData.CharacterObject _:
+            case CharacterObject _:
                 {
                     //uint timeNow = WorldServiceLocator._Functions.GetTimestamp(DateAndTime.Now);
                     List<int> cooldownSpells = new();
-                    foreach (var Spell in ((WS_PlayerData.CharacterObject)targetUnit).Spells)
+                    foreach (var Spell in ((CharacterObject)targetUnit).Spells)
                     {
                         if (Spell.Value.Cooldown != 0)
                         {
                             Spell.Value.Cooldown = 0u;
                             Spell.Value.CooldownItem = 0;
-                            WorldServiceLocator.WorldServer.CharacterDatabase.Update(string.Format("UPDATE characters_spells SET cooldown={2}, cooldownitem={3} WHERE guid = {0} AND spellid = {1};", objCharacter.GUID, Spell.Key, 0, 0));
+                            characterDatabase.Update(string.Format("UPDATE characters_spells SET cooldown={2}, cooldownitem={3} WHERE guid = {0} AND spellid = {1};", objCharacter.GUID, Spell.Key, 0, 0));
                             cooldownSpells.Add(Spell.Key);
                         }
                     }
@@ -739,7 +823,7 @@ public class WS_Commands
                         Packets.PacketClass packet = new(Opcodes.SMSG_CLEAR_COOLDOWN);
                         packet.AddInt32(SpellID);
                         packet.AddUInt64(targetUnit.GUID);
-                        ((WS_PlayerData.CharacterObject)targetUnit).client.Send(ref packet);
+                        ((CharacterObject)targetUnit).client.Send(ref packet);
                         packet.Dispose();
                     }
 
@@ -754,30 +838,30 @@ public class WS_Commands
     }
 
     [ChatCommand("additem", "additem #itemid #count (optional) - Add chosen items with item amount to selected character.")]
-    public bool cmdAddItem(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdAddItem(ref CharacterObject objCharacter, string Message)
     {
         var tmp = Strings.Split(Message, " ", 2);
         if (tmp.Length < 1)
         {
             return false;
         }
+
         var Count = 1;
         if (tmp.Length == 2)
         {
             Count = Conversions.ToInteger(tmp[1]);
         }
+
         checked
         {
             var id = Conversions.ToInteger(tmp[0]);
-            if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+            if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && worldState.Characters.ContainsKey(objCharacter.TargetGUID))
             {
-                ItemObject newItem2 = new(id, objCharacter.TargetGUID)
+                var newItem2 = itemObjectFactory.Create(id, objCharacter.TargetGUID, Count);
+
+                if (worldState.Characters[objCharacter.TargetGUID].ItemADD(ref newItem2))
                 {
-                    StackCount = Count
-                };
-                if (WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].ItemADD(ref newItem2))
-                {
-                    WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].LogLootItem(newItem2, (byte)Count, Recieved: true, Created: false);
+                    worldState.Characters[objCharacter.TargetGUID].LogLootItem(newItem2, (byte)Count, Recieved: true, Created: false);
                 }
                 else
                 {
@@ -786,10 +870,8 @@ public class WS_Commands
             }
             else
             {
-                ItemObject newItem = new(id, objCharacter.GUID)
-                {
-                    StackCount = Count
-                };
+                var newItem = itemObjectFactory.Create(id, objCharacter.TargetGUID, Count);
+
                 if (objCharacter.ItemADD(ref newItem))
                 {
                     objCharacter.LogLootItem(newItem, (byte)Count, Recieved: false, Created: true);
@@ -799,12 +881,13 @@ public class WS_Commands
                     newItem.Delete();
                 }
             }
+
             return true;
         }
     }
 
     [ChatCommand("additemset", "additemset #item - Add the items in the item set with id X to selected character.")]
-    public bool cmdAddItemSet(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdAddItemSet(ref CharacterObject objCharacter, string Message)
     {
         var tmp = Strings.Split(Message, " ", 2);
         if (tmp.Length < 1)
@@ -812,19 +895,17 @@ public class WS_Commands
             return false;
         }
         var id = Conversions.ToInteger(tmp[0]);
-        if (WorldServiceLocator.WSDBCDatabase.ItemSet.ContainsKey(id))
+        if (database.ItemSet.ContainsKey(id))
         {
-            if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+            if (LegacyGlobalFunctions.GuidIsPlayer(objCharacter.TargetGUID) && worldState.Characters.ContainsKey(objCharacter.TargetGUID))
             {
-                foreach (var item in WorldServiceLocator.WSDBCDatabase.ItemSet[id].ItemID)
+                foreach (var item in database.ItemSet[id].ItemID)
                 {
-                    ItemObject newItem = new(item, objCharacter.TargetGUID)
+                    var newItem = itemObjectFactory.Create(item, objCharacter.TargetGUID, 1);
+
+                    if (worldState.Characters[objCharacter.TargetGUID].ItemADD(ref newItem))
                     {
-                        StackCount = 1
-                    };
-                    if (WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].ItemADD(ref newItem))
-                    {
-                        WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].LogLootItem(newItem, 1, Recieved: false, Created: true);
+                        worldState.Characters[objCharacter.TargetGUID].LogLootItem(newItem, 1, Recieved: false, Created: true);
                     }
                     else
                     {
@@ -834,12 +915,10 @@ public class WS_Commands
             }
             else
             {
-                foreach (var item2 in WorldServiceLocator.WSDBCDatabase.ItemSet[id].ItemID)
+                foreach (var item2 in database.ItemSet[id].ItemID)
                 {
-                    ItemObject newItem2 = new(item2, objCharacter.GUID)
-                    {
-                        StackCount = 1
-                    };
+                    var newItem2 = itemObjectFactory.Create(item2, objCharacter.TargetGUID, 1);
+
                     if (objCharacter.ItemADD(ref newItem2))
                     {
                         objCharacter.LogLootItem(newItem2, 1, Recieved: false, Created: true);
@@ -855,7 +934,7 @@ public class WS_Commands
     }
 
     [ChatCommand("addmoney", "addmoney #amount - Add chosen copper to your character or selected character.")]
-    public bool cmdAddMoney(ref WS_PlayerData.CharacterObject objCharacter, string tCopper)
+    public bool cmdAddMoney(ref CharacterObject objCharacter, string tCopper)
     {
         if (Operators.CompareString(tCopper, "", TextCompare: false) == 0)
         {
@@ -883,29 +962,29 @@ public class WS_Commands
     }
 
     [ChatCommand("learnskill", "learnskill #id #current #max - Add skill id X with value Y of Z to selected character.", AccessLevel.Developer)]
-    public bool cmdLearnSkill(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdLearnSkill(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
             return false;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             var tmp = Strings.Split(Strings.Trim(Message));
             var SkillID = Conversions.ToInteger(tmp[0]);
             var Current = Conversions.ToShort(tmp[1]);
             var Maximum = Conversions.ToShort(tmp[2]);
-            if (WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Skills.ContainsKey(SkillID))
+            if (worldState.Characters[objCharacter.TargetGUID].Skills.ContainsKey(SkillID))
             {
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Skills[SkillID].Base = Maximum;
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Skills[SkillID].Current = Current;
+                worldState.Characters[objCharacter.TargetGUID].Skills[SkillID].Base = Maximum;
+                worldState.Characters[objCharacter.TargetGUID].Skills[SkillID].Current = Current;
             }
             else
             {
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].LearnSkill(SkillID, Current, Maximum);
+                worldState.Characters[objCharacter.TargetGUID].LearnSkill(SkillID, Current, Maximum);
             }
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].FillAllUpdateFlags();
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SendUpdate();
+            worldState.Characters[objCharacter.TargetGUID].FillAllUpdateFlags();
+            worldState.Characters[objCharacter.TargetGUID].SendUpdate();
         }
         else
         {
@@ -915,7 +994,7 @@ public class WS_Commands
     }
 
     [ChatCommand("learnSpell", "learnSpell #id - Add chosen spell to selected character.", AccessLevel.Developer)]
-    public bool cmdLearnSpell(ref WS_PlayerData.CharacterObject objCharacter, string tID)
+    public bool cmdLearnSpell(ref CharacterObject objCharacter, string tID)
     {
         if (Operators.CompareString(tID, "", TextCompare: false) == 0)
         {
@@ -925,21 +1004,21 @@ public class WS_Commands
         {
             return false;
         }
-        if (!WorldServiceLocator.WSSpells.SPELLs.ContainsKey(ID))
+        if (!WS_Spells.SPELLs.ContainsKey(ID))
         {
             objCharacter.CommandResponse("You tried learning a spell that did not exist.");
             return false;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].LearnSpell(ID);
+            worldState.Characters[objCharacter.TargetGUID].LearnSpell(ID);
             if (objCharacter.TargetGUID == objCharacter.GUID)
             {
                 objCharacter.CommandResponse("You learned spell: " + Conversions.ToString(ID));
             }
             else
             {
-                objCharacter.CommandResponse(WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Name + " has learned spell: " + Conversions.ToString(ID));
+                objCharacter.CommandResponse(worldState.Characters[objCharacter.TargetGUID].Name + " has learned spell: " + Conversions.ToString(ID));
             }
         }
         else
@@ -950,23 +1029,23 @@ public class WS_Commands
     }
 
     [ChatCommand("unlearnspell", "unlearnspell #id - Remove chosen spell from selected character.", AccessLevel.Developer)]
-    public bool cmdUnlearnSpell(ref WS_PlayerData.CharacterObject objCharacter, string tID)
+    public bool cmdUnlearnSpell(ref CharacterObject objCharacter, string tID)
     {
         if (Operators.CompareString(tID, "", TextCompare: false) == 0)
         {
             return false;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             var ID = Conversions.ToInteger(tID);
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].UnLearnSpell(ID);
+            worldState.Characters[objCharacter.TargetGUID].UnLearnSpell(ID);
             if (objCharacter.TargetGUID == objCharacter.GUID)
             {
                 objCharacter.CommandResponse("You unlearned spell: " + Conversions.ToString(ID));
             }
             else
             {
-                objCharacter.CommandResponse(WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Name + " has unlearned spell: " + Conversions.ToString(ID));
+                objCharacter.CommandResponse(worldState.Characters[objCharacter.TargetGUID].Name + " has unlearned spell: " + Conversions.ToString(ID));
             }
         }
         else
@@ -977,14 +1056,14 @@ public class WS_Commands
     }
 
     [ChatCommand("showtaxi", "showtaxi - Unlock all taxi locations.", AccessLevel.Developer)]
-    public bool cmdShowTaxi(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdShowTaxi(ref CharacterObject objCharacter, string Message)
     {
         objCharacter.TaxiZones.SetAll(value: true);
         return true;
     }
 
     [ChatCommand("setcharacterspeed", "setcharacterspeed #value - Change your character travel speed.")]
-    public bool cmdSetCharacterSpeed(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSetCharacterSpeed(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
@@ -1000,7 +1079,7 @@ public class WS_Commands
     }
 
     [ChatCommand("setreputation", "setreputation #faction #value - Change your reputation standings.")]
-    public bool cmdSetReputation(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSetReputation(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
@@ -1013,16 +1092,16 @@ public class WS_Commands
     }
 
     [ChatCommand("changemodel", "changemodel #id - Will morph you into specified model ID.")]
-    public bool cmdModel(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdModel(ref CharacterObject objCharacter, string Message)
     {
         if (!int.TryParse(Message, out var value) || value < 0)
         {
             return false;
         }
-        if (WorldServiceLocator.WSDBCDatabase.CreatureModel.ContainsKey(value))
+        if (database.CreatureModel.ContainsKey(value))
         {
-            objCharacter.BoundingRadius = WorldServiceLocator.WSDBCDatabase.CreatureModel[value].BoundingRadius;
-            objCharacter.CombatReach = WorldServiceLocator.WSDBCDatabase.CreatureModel[value].CombatReach;
+            objCharacter.BoundingRadius = database.CreatureModel[value].BoundingRadius;
+            objCharacter.CombatReach = database.CreatureModel[value].CombatReach;
         }
         objCharacter.SetUpdateFlag(129, objCharacter.BoundingRadius);
         objCharacter.SetUpdateFlag(130, objCharacter.CombatReach);
@@ -1032,7 +1111,7 @@ public class WS_Commands
     }
 
     [ChatCommand("mount", "mount #id - Will mount you to specified model ID.")]
-    public bool cmdMount(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdMount(ref CharacterObject objCharacter, string Message)
     {
         if (!int.TryParse(Message, out var value) || value < 0)
         {
@@ -1044,167 +1123,167 @@ public class WS_Commands
     }
 
     [ChatCommand("hover", "hover - Allows the selected character to hover in air.")]
-    public bool cmdHover(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdHover(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetHover();
+            worldState.Characters[objCharacter.TargetGUID].SetHover();
             return true;
         }
         return true;
     }
 
     [ChatCommand("bank", "bank - Pops open bank tab on selected character")]
-    public bool cmdBank(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdBank(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].ShowBank();
+            worldState.Characters[objCharacter.TargetGUID].ShowBank();
             return true;
         }
         return true;
     }
 
     [ChatCommand("hurt", "hurt - Hurts a selected character.")]
-    public bool cmdHurt(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdHurt(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             WS_PlayerHelper.TStatBar life;
-            (life = WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Life).Current = checked((int)Math.Round(life.Current - (WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Life.Maximum * 0.1)));
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetUpdateFlag(22, WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Life.Current);
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SendCharacterUpdate();
+            (life = worldState.Characters[objCharacter.TargetGUID].Life).Current = checked((int)Math.Round(life.Current - (worldState.Characters[objCharacter.TargetGUID].Life.Maximum * 0.1)));
+            worldState.Characters[objCharacter.TargetGUID].SetUpdateFlag(22, worldState.Characters[objCharacter.TargetGUID].Life.Current);
+            worldState.Characters[objCharacter.TargetGUID].SendCharacterUpdate();
             return true;
         }
         return true;
     }
 
     [ChatCommand("splinestartswim", "splinestartswim - Allows the selected character to swim in air.")]
-    public bool cmdFly(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdFly(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetUpdateFlag(2, WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].charMovementFlags); // Need proper update flag or a way to set the Swim MovementFlag
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SplineStartSwim();
+            worldState.Characters[objCharacter.TargetGUID].SetUpdateFlag(2, worldState.Characters[objCharacter.TargetGUID].charMovementFlags); // Need proper update flag or a way to set the Swim MovementFlag
+            worldState.Characters[objCharacter.TargetGUID].SplineStartSwim();
             return true;
         }
         return true;
     }
 
     [ChatCommand("splinestopswim", "splinestopswim - Disallows the selected character to swim in air.")]
-    public bool cmdFlyOff(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdFlyOff(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SplineStopSwim();
+            worldState.Characters[objCharacter.TargetGUID].SplineStopSwim();
             return true;
         }
         return true;
     }
 
     [ChatCommand("waterwalk", "waterwalk - Sets waterwalk on selected character.")]
-    public bool cmdWaterWalk(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdWaterWalk(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetWaterWalk();
+            worldState.Characters[objCharacter.TargetGUID].SetWaterWalk();
             return true;
         }
         return true;
     }
 
     [ChatCommand("landwalk", "root - Sets landwalk on selected character.")]
-    public bool cmdLandWalk(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdLandWalk(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetLandWalk();
+            worldState.Characters[objCharacter.TargetGUID].SetLandWalk();
             return true;
         }
         return true;
     }
 
     [ChatCommand("root", "root - Instantly root selected character.")]
-    public bool cmdRoot(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdRoot(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetMoveRoot();
+            worldState.Characters[objCharacter.TargetGUID].SetMoveRoot();
             return true;
         }
         return true;
     }
 
     [ChatCommand("unroot", "unroot - Instantly unroot selected character.")]
-    public bool cmdUnRoot(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdUnRoot(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].SetMoveUnroot();
+            worldState.Characters[objCharacter.TargetGUID].SetMoveUnroot();
             return true;
         }
         return true;
     }
 
     [ChatCommand("revive", "revive - Instantly revive selected character.")]
-    public bool cmdRevive(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdRevive(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             ulong targetGUID;
-            Dictionary<ulong, WS_PlayerData.CharacterObject> cHARACTERs;
-            var Character = (cHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[targetGUID = objCharacter.TargetGUID];
-            WorldServiceLocator.WSHandlersMisc.CharacterResurrect(ref Character);
+            Dictionary<ulong, CharacterObject> cHARACTERs;
+            var Character = (cHARACTERs = worldState.Characters)[targetGUID = objCharacter.TargetGUID];
+            characterResurrectionService.CharacterResurrect(ref Character);
             cHARACTERs[targetGUID] = Character;
             return true;
         }
@@ -1212,19 +1291,19 @@ public class WS_Commands
     }
 
     [ChatCommand("gotogy", "gotogy - Instantly teleports selected character to nearest graveyard.")]
-    public bool cmdGoToGraveyard(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdGoToGraveyard(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             ulong targetGUID;
-            Dictionary<ulong, WS_PlayerData.CharacterObject> cHARACTERs;
-            var Character = (cHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[targetGUID = objCharacter.TargetGUID];
-            WorldServiceLocator.WorldServer.AllGraveYards.GoToNearestGraveyard(ref Character, Alive: false, Teleport: true);
+            Dictionary<ulong, CharacterObject> cHARACTERs;
+            var Character = (cHARACTERs = worldState.Characters)[targetGUID = objCharacter.TargetGUID];
+            worldState.GraveyardsService.GoToNearestGraveyard(ref Character, Alive: false, Teleport: true);
             cHARACTERs[targetGUID] = Character;
             return true;
         }
@@ -1232,17 +1311,17 @@ public class WS_Commands
     }
 
     [ChatCommand("tostart", "tostart #race - Instantly teleports selected character to specified race start location.")]
-    public bool cmdGoToStart(ref WS_PlayerData.CharacterObject objCharacter, string StringRace)
+    public bool cmdGoToStart(ref CharacterObject objCharacter, string StringRace)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
             Races Race;
-            switch (WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(StringRace))
+            switch (StringFormatFunctions.UppercaseFirstLetter(StringRace))
             {
                 case "DWARF":
                 case "DW":
@@ -1289,8 +1368,8 @@ public class WS_Commands
                     return true;
             }
             DataTable Info = new();
-            WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM playercreateinfo WHERE race = {(int)Race};", ref Info);
-            var Character = WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID];
+            worldDatabase.Query($"SELECT * FROM playercreateinfo WHERE race = {(int)Race};", ref Info);
+            var Character = worldState.Characters[objCharacter.TargetGUID];
             Character.Teleport(Conversions.ToSingle(Info.Rows[0]["position_x"]), Conversions.ToSingle(Info.Rows[0]["position_y"]), Conversions.ToSingle(Info.Rows[0]["position_z"]), Conversions.ToSingle(Info.Rows[0]["orientation"]), Conversions.ToInteger(Info.Rows[0]["map"]));
             return true;
         }
@@ -1298,21 +1377,21 @@ public class WS_Commands
     }
 
     [ChatCommand("summon", "summon #name - Instantly teleports the player to you.")]
-    public bool cmdSummon(ref WS_PlayerData.CharacterObject objCharacter, string Name)
+    public bool cmdSummon(ref CharacterObject objCharacter, string Name)
     {
         checked
         {
-            var GUID = GetGUID(WorldServiceLocator.Functions.CapitalizeName(ref Name));
-            if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(GUID))
+            var GUID = GetGUID(Globals.Functions.CapitalizeName(ref Name));
+            if (worldState.Characters.ContainsKey(GUID))
             {
                 if (objCharacter.OnTransport != null)
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs[GUID].OnTransport = objCharacter.OnTransport;
-                    WorldServiceLocator.WorldServer.CHARACTERs[GUID].Transfer(objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation, (int)objCharacter.MapID);
+                    worldState.Characters[GUID].OnTransport = objCharacter.OnTransport;
+                    worldState.Characters[GUID].Transfer(objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation, (int)objCharacter.MapID);
                 }
                 else
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs[GUID].Teleport(objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation, (int)objCharacter.MapID);
+                    worldState.Characters[GUID].Teleport(objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation, (int)objCharacter.MapID);
                 }
                 return true;
             }
@@ -1322,14 +1401,14 @@ public class WS_Commands
     }
 
     [ChatCommand("appear", "appear #name - Instantly teleports you to the player.")]
-    public bool cmdAppear(ref WS_PlayerData.CharacterObject objCharacter, string Name)
+    public bool cmdAppear(ref CharacterObject objCharacter, string Name)
     {
-        var GUID = GetGUID(WorldServiceLocator.Functions.CapitalizeName(ref Name));
+        var GUID = GetGUID(Globals.Functions.CapitalizeName(ref Name));
         checked
         {
-            if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(GUID))
+            if (worldState.Characters.ContainsKey(GUID))
             {
-                var characterObject = WorldServiceLocator.WorldServer.CHARACTERs[GUID];
+                var characterObject = worldState.Characters[GUID];
                 if (characterObject.OnTransport != null)
                 {
                     objCharacter.OnTransport = characterObject.OnTransport;
@@ -1348,11 +1427,11 @@ public class WS_Commands
     }
 
     [ChatCommand("los", "los #on/off - Enables/Disables line of sight calculation.", AccessLevel.Developer)]
-    public bool cmdLineOfSight(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdLineOfSight(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message.ToUpper(), "on", TextCompare: false) == 0)
         {
-            WorldServiceLocator.MangosConfiguration.World.LineOfSightEnabled = true;
+            configuration.World.LineOfSightEnabled = true;
             objCharacter.CommandResponse("Line of Sight Calculation is now Enabled.");
         }
         else
@@ -1361,14 +1440,15 @@ public class WS_Commands
             {
                 return false;
             }
-            WorldServiceLocator.MangosConfiguration.World.LineOfSightEnabled = false;
+
+            configuration.World.LineOfSightEnabled = false;
             objCharacter.CommandResponse("Line of Sight Calculation is now Disabled.");
         }
         return true;
     }
 
     [ChatCommand("gps", "gps - Tells you where you are located.")]
-    public bool cmdGPS(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdGPS(ref CharacterObject objCharacter, string Message)
     {
         objCharacter.CommandResponse("X: " + Conversions.ToString(objCharacter.positionX));
         objCharacter.CommandResponse("Y: " + Conversions.ToString(objCharacter.positionY));
@@ -1379,7 +1459,7 @@ public class WS_Commands
     }
 
     [ChatCommand("SetInstance", "SETINSTANCE <ID> - Sets you into another instance.", AccessLevel.Admin)]
-    public bool cmdSetInstance(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSetInstance(ref CharacterObject objCharacter, string Message)
     {
         if (!int.TryParse(Message, out var instanceID))
         {
@@ -1394,7 +1474,7 @@ public class WS_Commands
     }
 
     [ChatCommand("port", "port #x #y #z #orientation #map - Teleports Character To Given Coordinates.")]
-    public bool cmdPort(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdPort(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
@@ -1418,16 +1498,16 @@ public class WS_Commands
     }
 
     [ChatCommand("teleport", "teleport #locationname - Teleports character to given location name.")]
-    public bool CmdPortByName(ref WS_PlayerData.CharacterObject objCharacter, string location)
+    public bool CmdPortByName(ref CharacterObject objCharacter, string location)
     {
         if (Operators.CompareString(location, "", TextCompare: false) == 0)
         {
             return false;
         }
-        if (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(location), "LIST", TextCompare: false) == 0)
+        if (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(location), "LIST", TextCompare: false) == 0)
         {
             DataTable listSqlQuery = new();
-            WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT * FROM game_tele order by name", ref listSqlQuery);
+            worldDatabase.Query("SELECT * FROM game_tele order by name", ref listSqlQuery);
             IEnumerator enumerator = default;
             var cmdList = "Listing of available locations:" + Environment.NewLine;
             try
@@ -1455,11 +1535,11 @@ public class WS_Commands
         if (location.Contains("*"))
         {
             location = location.Replace("*", "");
-            WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM game_tele WHERE name like '{location}%' order by name;", ref mySqlQuery);
+            worldDatabase.Query($"SELECT * FROM game_tele WHERE name like '{location}%' order by name;", ref mySqlQuery);
         }
         else
         {
-            WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM game_tele WHERE name = '{location}' order by name LIMIT 1;", ref mySqlQuery);
+            worldDatabase.Query($"SELECT * FROM game_tele WHERE name = '{location}' order by name LIMIT 1;", ref mySqlQuery);
         }
         if (mySqlQuery.Rows.Count > 0)
         {
@@ -1501,7 +1581,7 @@ public class WS_Commands
     }
 
     [ChatCommand("kick", "kick #name (optional) - Kick selected player or character with name specified if found.")]
-    public bool cmdKick(ref WS_PlayerData.CharacterObject objCharacter, string Name)
+    public bool cmdKick(ref CharacterObject objCharacter, string Name)
     {
         if (Operators.CompareString(Name, "", TextCompare: false) == 0)
         {
@@ -1509,12 +1589,12 @@ public class WS_Commands
             {
                 objCharacter.CommandResponse("No target selected.");
             }
-            else if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+            else if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
             {
-                objCharacter.CommandResponse($"Character [{WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Name}] kicked from server.");
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "[{0}:{1}] Character [{3}] kicked by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.client.Character.Name, WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Name);
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Logout();
-                WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID].Dispose();
+                objCharacter.CommandResponse($"Character [{worldState.Characters[objCharacter.TargetGUID].Name}] kicked from server.");
+                logger.LogInformation("[{0}:{1}] Character [{3}] kicked by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.client.Character.Name, worldState.Characters[objCharacter.TargetGUID].Name);
+                worldState.Characters[objCharacter.TargetGUID].Logout();
+                worldState.Characters[objCharacter.TargetGUID].Dispose();
             }
             else
             {
@@ -1523,35 +1603,35 @@ public class WS_Commands
         }
         else
         {
-            WorldServiceLocator.WorldServer.CHARACTERs_Lock.AcquireReaderLock(WorldServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-            foreach (var Character in WorldServiceLocator.WorldServer.CHARACTERs)
+            worldState.CharactersLock.EnterReadLock();
+            foreach (var Character in worldState.Characters)
             {
-                if (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(Character.Value.Name), Name, TextCompare: false) == 0)
+                if (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(Character.Value.Name), Name, TextCompare: false) == 0)
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs_Lock.ReleaseReaderLock();
+                    worldState.CharactersLock.ExitReadLock();
                     Character.Value.Logout();
                     Character.Value.Dispose();
                     objCharacter.CommandResponse($"Character [{Character.Value.Name}] kicked from server.");
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "[{0}:{1}] Character [{3}] kicked by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.client.Character.Name, Name);
+                    logger.LogInformation("[{0}:{1}] Character [{3}] kicked by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.client.Character.Name, Name);
                     return true;
                 }
             }
-            WorldServiceLocator.WorldServer.CHARACTERs_Lock.ReleaseReaderLock();
+            worldState.CharactersLock.ExitReadLock();
             objCharacter.CommandResponse($"Character [{Name:X}] not found.");
         }
         return true;
     }
 
     [ChatCommand("forcerename", "forcerename - Force selected player to change their name next time on char enum.")]
-    public bool cmdForceRename(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdForceRename(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("No target selected.");
         }
-        else if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        else if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CharacterDatabase.Update($"UPDATE characters SET force_restrictions = 1 WHERE char_guid = {objCharacter.TargetGUID};");
+            characterDatabase.Update($"UPDATE characters SET force_restrictions = 1 WHERE char_guid = {objCharacter.TargetGUID};");
             objCharacter.CommandResponse("Player will be asked to change their name on next logon.");
         }
         else
@@ -1562,15 +1642,15 @@ public class WS_Commands
     }
 
     [ChatCommand("bancharacter", "bancharacter - Selected player won't be able to login next time with this character.")]
-    public bool cmdBanChar(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdBanChar(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("No target selected.");
         }
-        else if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        else if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            WorldServiceLocator.WorldServer.CharacterDatabase.Update($"UPDATE characters SET force_restrictions = 2 WHERE char_guid = {objCharacter.TargetGUID};");
+            characterDatabase.Update($"UPDATE characters SET force_restrictions = 2 WHERE char_guid = {objCharacter.TargetGUID};");
             objCharacter.CommandResponse("Character disabled.");
         }
         else
@@ -1581,18 +1661,18 @@ public class WS_Commands
     }
 
     [ChatCommand("banaccount", "banaccount #account - Ban specified account from server.")]
-    public bool cmdBan(ref WS_PlayerData.CharacterObject objCharacter, string Name)
+    public bool cmdBan(ref CharacterObject objCharacter, string Name)
     {
         if (Operators.CompareString(Name, "", TextCompare: false) == 0)
         {
             return false;
         }
         DataTable account = new();
-        WorldServiceLocator.WorldServer.AccountDatabase.Query("SELECT id, last_ip FROM account WHERE username = \"" + Name + "\";", ref account);
+        accountDatabase.Query("SELECT id, last_ip FROM account WHERE username = \"" + Name + "\";", ref account);
         var accountID = Conversions.ToULong(account.Rows[0]["id"]);
         var IP = Conversions.ToInteger(account.Rows[0]["last_ip"]);
         DataTable result = new();
-        WorldServiceLocator.WorldServer.AccountDatabase.Query("SELECT active FROM account_banned WHERE id = " + Conversions.ToString(accountID) + ";", ref result);
+        accountDatabase.Query("SELECT active FROM account_banned WHERE id = " + Conversions.ToString(accountID) + ";", ref result);
         if (result.Rows.Count > 0)
         {
             if (Operators.ConditionalCompareObjectEqual(result.Rows[0]["active"], 1, TextCompare: false))
@@ -1601,10 +1681,10 @@ public class WS_Commands
             }
             else
             {
-                WorldServiceLocator.WorldServer.AccountDatabase.Update(string.Format("INSERT INTO `account_banned` VALUES ('{0}', UNIX_TIMESTAMP({1}), UNIX_TIMESTAMP({2}), '{3}', '{4}', active = 1);", accountID, Strings.Format(DateAndTime.Now, "yyyy-MM-dd hh:mm:ss"), "0000-00-00 00:00:00", objCharacter.Name, "No Reason Specified."));
-                WorldServiceLocator.WorldServer.AccountDatabase.Update(string.Format("INSERT INTO `ip_banned` VALUES ('{0}', UNIX_TIMESTAMP({1}), UNIX_TIMESTAMP({2}), '{3}', '{4}');", IP, Strings.Format(DateAndTime.Now, "yyyy-MM-dd hh:mm:ss"), "0000-00-00 00:00:00", objCharacter.Name, "No Reason Specified."));
+                accountDatabase.Update(string.Format("INSERT INTO `account_banned` VALUES ('{0}', UNIX_TIMESTAMP({1}), UNIX_TIMESTAMP({2}), '{3}', '{4}', active = 1);", accountID, Strings.Format(DateAndTime.Now, "yyyy-MM-dd hh:mm:ss"), "0000-00-00 00:00:00", objCharacter.Name, "No Reason Specified."));
+                accountDatabase.Update(string.Format("INSERT INTO `ip_banned` VALUES ('{0}', UNIX_TIMESTAMP({1}), UNIX_TIMESTAMP({2}), '{3}', '{4}');", IP, Strings.Format(DateAndTime.Now, "yyyy-MM-dd hh:mm:ss"), "0000-00-00 00:00:00", objCharacter.Name, "No Reason Specified."));
                 objCharacter.CommandResponse($"Account [{Name}] banned.");
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "[{0}:{1}] Account [{3}] banned by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.Name, Name);
+                logger.LogInformation("[{0}:{1}] Account [{3}] banned by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.Name, Name);
             }
         }
         else
@@ -1615,18 +1695,18 @@ public class WS_Commands
     }
 
     [ChatCommand("unban", "unban #account - Remove ban of specified account from server.", AccessLevel.Admin)]
-    public bool cmdUnBan(ref WS_PlayerData.CharacterObject objCharacter, string Name)
+    public bool cmdUnBan(ref CharacterObject objCharacter, string Name)
     {
         if (Operators.CompareString(Name, "", TextCompare: false) == 0)
         {
             return false;
         }
         DataTable account = new();
-        WorldServiceLocator.WorldServer.AccountDatabase.Query("SELECT id, last_ip FROM account WHERE username = \"" + Name + "\";", ref account);
+        accountDatabase.Query("SELECT id, last_ip FROM account WHERE username = \"" + Name + "\";", ref account);
         var accountID = Conversions.ToULong(account.Rows[0]["id"]);
         var IP = Conversions.ToInteger(account.Rows[0]["last_ip"]);
         DataTable result = new();
-        WorldServiceLocator.WorldServer.AccountDatabase.Query("SELECT active FROM account_banned WHERE id = '" + Conversions.ToString(accountID) + "';", ref result);
+        accountDatabase.Query("SELECT active FROM account_banned WHERE id = '" + Conversions.ToString(accountID) + "';", ref result);
         if (result.Rows.Count > 0)
         {
             if (Operators.ConditionalCompareObjectEqual(result.Rows[0]["active"], 0, TextCompare: false))
@@ -1635,10 +1715,10 @@ public class WS_Commands
             }
             else
             {
-                WorldServiceLocator.WorldServer.AccountDatabase.Update("UPDATE account_banned SET active = 0 WHERE id = '" + Conversions.ToString(accountID) + "';");
-                WorldServiceLocator.WorldServer.AccountDatabase.Update($"DELETE FROM `ip_banned` WHERE `ip` = '{IP}';");
+                accountDatabase.Update("UPDATE account_banned SET active = 0 WHERE id = '" + Conversions.ToString(accountID) + "';");
+                accountDatabase.Update($"DELETE FROM `ip_banned` WHERE `ip` = '{IP}';");
                 objCharacter.CommandResponse($"Account [{Name}] unbanned.");
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "[{0}:{1}] Account [{3}] unbanned by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.Name, Name);
+                logger.LogInformation("[{0}:{1}] Account [{3}] unbanned by [{2}].", objCharacter.client.IP, objCharacter.client.Port, objCharacter.Name, Name);
             }
         }
         else
@@ -1649,19 +1729,19 @@ public class WS_Commands
     }
 
     [ChatCommand("setgm", "set gm #flag #invisibility - Toggles gameMaster status. You can use values like On/Off.")] // Doesn't seem to work, are the player updateflags wrong?
-    public bool cmdSetGM(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSetGM(ref CharacterObject objCharacter, string Message)
     {
         var tmp = Strings.Split(Message, " ", 2);
         var value1 = tmp[0];
         var value2 = tmp[1];
-        switch (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(value1), "on", TextCompare: false))
+        switch (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(value1), "on", TextCompare: false))
         {
             case 0:
                 objCharacter.GM = true;
                 objCharacter.CommandResponse("GameMaster Flag turned on.");
                 break;
             default:
-                if (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(value1), "off", TextCompare: false) == 0)
+                if (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(value1), "off", TextCompare: false) == 0)
                 {
                     objCharacter.GM = false;
                     objCharacter.CommandResponse("GameMaster Flag turned off.");
@@ -1669,7 +1749,7 @@ public class WS_Commands
 
                 break;
         }
-        switch (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(value2), "on", TextCompare: false))
+        switch (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(value2), "on", TextCompare: false))
         {
             case 1:
                 objCharacter.Invisibility = InvisibilityLevel.GM;
@@ -1678,7 +1758,7 @@ public class WS_Commands
                 objCharacter.CommandResponse("GameMaster Invisibility turned on.");
                 break;
             default:
-                if (Operators.CompareString(WorldServiceLocator.CommonFunctions.UppercaseFirstLetter(value2), "off", TextCompare: false) == 0)
+                if (Operators.CompareString(StringFormatFunctions.UppercaseFirstLetter(value2), "off", TextCompare: false) == 0)
                 {
                     objCharacter.Invisibility = InvisibilityLevel.VISIBLE;
                     objCharacter.CanSeeInvisibility = InvisibilityLevel.VISIBLE;
@@ -1690,135 +1770,136 @@ public class WS_Commands
         }
         objCharacter.SetUpdateFlag(190, (int)objCharacter.cPlayerFlags);
         objCharacter.SendCharacterUpdate(true);
-        WorldServiceLocator.WSCharMovement.UpdateCell(ref objCharacter);
+        cellUpdater.UpdateCell(ref objCharacter);
         return true;
     }
 
     [ChatCommand("setweather", "setweather #type #intensity - Change weather in current zone. Intensity is float value!", AccessLevel.Developer)]
-    public bool cmdSetWeather(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSetWeather(ref CharacterObject objCharacter, string Message)
     {
         var tmp = Strings.Split(Message, " ", 2);
         var Type = Conversions.ToInteger(tmp[0]);
         var Intensity = Conversions.ToSingle(tmp[1]);
-        if (!WorldServiceLocator.WSWeather.WeatherZones.ContainsKey(objCharacter.ZoneID))
+        if (!WS_Weather.WeatherZones.ContainsKey(objCharacter.ZoneID))
         {
             objCharacter.CommandResponse("No weather for this zone is found!");
         }
         else
         {
-            WorldServiceLocator.WSWeather.WeatherZones[objCharacter.ZoneID].CurrentWeather = (WeatherType)Type;
-            WorldServiceLocator.WSWeather.WeatherZones[objCharacter.ZoneID].Intensity = Intensity;
-            WorldServiceLocator.WSWeather.SendWeather(objCharacter.ZoneID, ref objCharacter.client);
+            WS_Weather.WeatherZones[objCharacter.ZoneID].CurrentWeather = (WeatherType)Type;
+            WS_Weather.WeatherZones[objCharacter.ZoneID].Intensity = Intensity;
+            WS_Weather.SendWeather(objCharacter.ZoneID, ref objCharacter.client);
         }
         return true;
     }
 
     [ChatCommand("remove", "remove #id - Delete selected creature or gameobject.", AccessLevel.Developer)]
-    public bool cmdDeleteObject(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdDeleteObject(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID))
         {
-            if (!WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+            if (!worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
             {
                 objCharacter.CommandResponse("Selected target is not creature!");
                 return true;
             }
-            WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].Destroy();
+            worldState.WorldCreatures[objCharacter.TargetGUID].Destroy();
             objCharacter.CommandResponse("Creature deleted.");
         }
-        else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsGameObject(objCharacter.TargetGUID))
+        else if (LegacyGlobalFunctions.GuidIsGameObject(objCharacter.TargetGUID))
         {
-            if (!WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs.ContainsKey(objCharacter.TargetGUID))
+            if (!worldState.WorldGameObjects.ContainsKey(objCharacter.TargetGUID))
             {
                 objCharacter.CommandResponse("Selected target is not game object!");
                 return true;
             }
-            WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].Destroy(WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID]);
+            _gameObjects.Destroy(worldState.WorldGameObjects[objCharacter.TargetGUID]);
             objCharacter.CommandResponse("Game object deleted.");
         }
         return true;
     }
 
     [ChatCommand("turn", "turn - Selected creature or game object will turn to your position.", AccessLevel.Developer)]
-    public bool cmdTurnObject(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdTurnObject(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID))
+        if (LegacyGlobalFunctions.GuidIsCreature(objCharacter.TargetGUID))
         {
-            if (!WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+            if (!worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
             {
                 objCharacter.CommandResponse("Selected target is not creature!");
                 return true;
             }
-            WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].TurnTo(objCharacter.positionX, objCharacter.positionY);
+            worldState.WorldCreatures[objCharacter.TargetGUID].TurnTo(objCharacter.positionX, objCharacter.positionY);
         }
-        else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsGameObject(objCharacter.TargetGUID))
+        else if (LegacyGlobalFunctions.GuidIsGameObject(objCharacter.TargetGUID))
         {
-            if (!WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs.ContainsKey(objCharacter.TargetGUID))
+            if (!worldState.WorldGameObjects.ContainsKey(objCharacter.TargetGUID))
             {
                 objCharacter.CommandResponse("Selected target is not game object!");
                 return true;
             }
-            WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].TurnTo(objCharacter.positionX, objCharacter.positionY);
+            worldState.WorldGameObjects[objCharacter.TargetGUID].TurnTo(objCharacter.positionX, objCharacter.positionY);
             DataTable _ = new();
-            var _2 = checked(objCharacter.TargetGUID - WorldServiceLocator.GlobalConstants.GUID_GAMEOBJECT);
+            var _2 = checked(objCharacter.TargetGUID - MangosGlobalConstants.GUID_GAMEOBJECT);
             objCharacter.CommandResponse("Object rotation will be visible when the object is reloaded!");
         }
         return true;
     }
 
     [ChatCommand("npcadd", "npcadd #id - Spawn creature at your position.", AccessLevel.Developer)]
-    public bool cmdAddCreature(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdAddCreature(ref CharacterObject objCharacter, string Message)
     {
-        WS_Creatures.CreatureObject tmpCr = new(Conversions.ToInteger(Message), objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation, checked((int)objCharacter.MapID));
+        var tmpCr = creatureObjectFactory.Create(Conversions.ToInteger(Message), objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation, checked((int)objCharacter.MapID));
+
         tmpCr.AddToWorld();
-        objCharacter.CommandResponse("Creature [" + WorldServiceLocator.Functions.SetColor(tmpCr.Name, 4, 147, 11) + "] spawned.");
+        objCharacter.CommandResponse("Creature [" + Globals.Functions.SetColor(tmpCr.Name, 4, 147, 11) + "] spawned.");
         return true;
     }
 
     [ChatCommand("npcrespawn", "npcrespawn #id - Respawn creature at spawn position.", AccessLevel.Developer)]
-    public bool cmdRespawnCreature(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdRespawnCreature(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (!WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        if (!worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
             objCharacter.CommandResponse("Selected target is not creature!");
             return true;
         }
-        var creature = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID];
+        var creature = worldState.WorldCreatures[objCharacter.TargetGUID];
         creature.SetToRealPosition(Forced: true);
         creature.Respawn();
-        objCharacter.CommandResponse("Creature [" + WorldServiceLocator.Functions.SetColor(creature.Name, 4, 147, 11) + "] Respawned.");
+        objCharacter.CommandResponse("Creature [" + Globals.Functions.SetColor(creature.Name, 4, 147, 11) + "] Respawned.");
         return true;
     }
 
     [ChatCommand("npccome", "npccome - Selected creature will come to your position.", AccessLevel.Developer)]
-    public bool cmdComeCreature(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdComeCreature(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (!WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        if (!worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
             objCharacter.CommandResponse("Selected target is not creature!");
             return true;
         }
-        var creature = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID];
+        var creature = worldState.WorldCreatures[objCharacter.TargetGUID];
         if (creature.aiScript != null && creature.aiScript.InCombat)
         {
             objCharacter.CommandResponse("Creature is in combat. It has to be out of combat first.");
@@ -1831,25 +1912,25 @@ public class WS_Commands
     }
 
     [ChatCommand("kill", "kill - Selected creature or character will die.")]
-    public bool cmdKillCreature(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdKillCreature(ref CharacterObject objCharacter, string Message)
     {
         if (decimal.Compare(new decimal(objCharacter.TargetGUID), 0m) == 0)
         {
             objCharacter.CommandResponse("Select target first!");
             return true;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.Characters.ContainsKey(objCharacter.TargetGUID))
         {
-            var characterObject = WorldServiceLocator.WorldServer.CHARACTERs[objCharacter.TargetGUID];
+            var characterObject = worldState.Characters[objCharacter.TargetGUID];
             WS_Base.BaseUnit Attacker = objCharacter;
             characterObject.Die(ref Attacker);
-            objCharacter = (WS_PlayerData.CharacterObject)Attacker;
+            objCharacter = (CharacterObject)Attacker;
             return true;
         }
-        if (WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(objCharacter.TargetGUID))
+        if (worldState.WorldCreatures.ContainsKey(objCharacter.TargetGUID))
         {
-            var creatureObject = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID];
-            var maximum = WorldServiceLocator.WorldServer.WORLD_CREATUREs[objCharacter.TargetGUID].Life.Maximum;
+            var creatureObject = worldState.WorldCreatures[objCharacter.TargetGUID];
+            var maximum = worldState.WorldCreatures[objCharacter.TargetGUID].Life.Maximum;
             WS_Base.BaseUnit Attacker = null;
             creatureObject.DealDamage(maximum, Attacker);
             return true;
@@ -1858,12 +1939,12 @@ public class WS_Commands
     }
 
     [ChatCommand("gobjecttarget", "gobjecttarget - Nearest game object will be selected.", AccessLevel.Developer)]
-    public bool cmdTargetGameObject(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdTargetGameObject(ref CharacterObject objCharacter, string Message)
     {
-        var wS_GameObjects = WorldServiceLocator.WSGameObjects;
+        var wS_GameObjects = _gameObjects;
         WS_Base.BaseUnit unit = objCharacter;
         var closestGameobject = wS_GameObjects.GetClosestGameobject(ref unit);
-        objCharacter = (WS_PlayerData.CharacterObject)unit;
+        objCharacter = (CharacterObject)unit;
         var targetGO = closestGameobject;
         if (targetGO == null)
         {
@@ -1871,46 +1952,49 @@ public class WS_Commands
         }
         else
         {
-            var distance = WorldServiceLocator.WSCombat.GetDistance(targetGO, objCharacter);
+            var distance = WS_Combat.GetDistance(targetGO, objCharacter);
             objCharacter.CommandResponse($"Selected [{targetGO.ID}][{targetGO.Name}] game object at distance {distance}.");
         }
         return true;
     }
 
     [ChatCommand("activatego", "activatego - Activates your targetted game object.", AccessLevel.Developer)]
-    public bool cmdActivateGameObject(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdActivateGameObject(ref CharacterObject objCharacter, string Message)
     {
-        if (!WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs.ContainsKey(objCharacter.TargetGUID))
+        if (!worldState.WorldGameObjects.ContainsKey(objCharacter.TargetGUID))
         {
             return false;
         }
-        if (WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].State == GameObjectLootState.DOOR_CLOSED)
+        if (worldState.WorldGameObjects[objCharacter.TargetGUID].State == GameObjectLootState.DOOR_CLOSED)
         {
-            WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].State = GameObjectLootState.DOOR_OPEN;
-            WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].SetState(GameObjectLootState.DOOR_OPEN);
+            worldState.WorldGameObjects[objCharacter.TargetGUID].State = GameObjectLootState.DOOR_OPEN;
+            worldState.WorldGameObjects[objCharacter.TargetGUID].SetState(GameObjectLootState.DOOR_OPEN);
         }
         else
         {
-            WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].State = GameObjectLootState.DOOR_CLOSED;
-            WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].SetState(GameObjectLootState.DOOR_CLOSED);
+            worldState.WorldGameObjects[objCharacter.TargetGUID].State = GameObjectLootState.DOOR_CLOSED;
+            worldState.WorldGameObjects[objCharacter.TargetGUID].SetState(GameObjectLootState.DOOR_CLOSED);
         }
-        objCharacter.CommandResponse($"Activated game object [{WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].Name}] to state [{WorldServiceLocator.WorldServer.WORLD_GAMEOBJECTs[objCharacter.TargetGUID].State}].");
+        objCharacter.CommandResponse($"Activated game object [{worldState.WorldGameObjects[objCharacter.TargetGUID].Name}] to state [{worldState.WorldGameObjects[objCharacter.TargetGUID].State}].");
         return true;
     }
 
     [ChatCommand("gobjectadd", "gobjectadd #id - Spawn game object at your position.", AccessLevel.Developer)]
-    public bool cmdAddGameObject(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdAddGameObject(ref CharacterObject objCharacter, string Message)
     {
-        WS_GameObjects.GameObject tmpGO = new(Conversions.ToInteger(Message), objCharacter.MapID, objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation);
+        var tmpGO = gameObjectFactory.Create(Conversions.ToInteger(Message), objCharacter.MapID, objCharacter.positionX, objCharacter.positionY, objCharacter.positionZ, objCharacter.orientation);
+
         tmpGO.Rotations[2] = (float)Math.Sin(tmpGO.orientation / 2f);
         tmpGO.Rotations[3] = (float)Math.Cos(tmpGO.orientation / 2f);
-        tmpGO.AddToWorld();
+
+        _gameObjects.AddToWorld(tmpGO);
         objCharacter.CommandResponse($"GameObject [{tmpGO.Name}][{tmpGO.GUID:X}] spawned.");
+
         return true;
     }
 
     [ChatCommand("createaccount", "createaccount #account #password #email - Add a New account using Name, Password, And Email.", AccessLevel.Admin)]
-    public bool cmdCreateAccount(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdCreateAccount(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
@@ -1925,7 +2009,7 @@ public class WS_Commands
         var aName = acct[0];
         var aPassword = acct[1];
         var aEmail = acct[2];
-        WorldServiceLocator.WorldServer.AccountDatabase.Query("SELECT username FROM account WHERE username = \"" + aName + "\";", ref result);
+        accountDatabase.Query("SELECT username FROM account WHERE username = \"" + aName + "\";", ref result);
         if (result.Rows.Count > 0)
         {
             objCharacter.CommandResponse($"Account [{aName}] already exists.");
@@ -1935,14 +2019,14 @@ public class WS_Commands
             var passwordStr = Encoding.ASCII.GetBytes(aName.ToUpper() + ":" + aPassword.ToUpper());
             var passwordHash = SHA1.HashData(passwordStr);
             var hashStr = BitConverter.ToString(passwordHash).Replace("-", "");
-            WorldServiceLocator.WorldServer.AccountDatabase.Insert(string.Format("INSERT INTO account (username, sha_pass_hash, email, joindate, last_ip) VALUES ('{0}', '{1}', '{2}', '{3}', '{4}')", aName, hashStr, aEmail, Strings.Format(DateAndTime.Now, "yyyy-MM-dd"), "0.0.0.0"));
+            accountDatabase.Insert(string.Format("INSERT INTO account (username, sha_pass_hash, email, joindate, last_ip) VALUES ('{0}', '{1}', '{2}', '{3}', '{4}')", aName, hashStr, aEmail, Strings.Format(DateAndTime.Now, "yyyy-MM-dd"), "0.0.0.0"));
             objCharacter.CommandResponse($"Account [{aName}] has been created.");
         }
         return true;
     }
 
     [ChatCommand("changepassword", "changepassword #account #password - Changes the password of an account.", AccessLevel.Admin)]
-    public bool cmdChangePassword(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdChangePassword(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
@@ -1956,7 +2040,7 @@ public class WS_Commands
         }
         var aName = acct[0];
         var aPassword = acct[1];
-        WorldServiceLocator.WorldServer.AccountDatabase.Query("SELECT id, gmlevel FROM account WHERE username = \"" + aName + "\";", ref result);
+        accountDatabase.Query("SELECT id, gmlevel FROM account WHERE username = \"" + aName + "\";", ref result);
         if (result.Rows.Count == 0)
         {
             objCharacter.CommandResponse($"Account [{aName}] does not exist.");
@@ -1973,7 +2057,7 @@ public class WS_Commands
                 var passwordStr = Encoding.ASCII.GetBytes(aName.ToUpper() + ":" + aPassword.ToUpper());
                 var passwordHash = SHA1.HashData(passwordStr);
                 var hashStr = BitConverter.ToString(passwordHash).Replace("-", "");
-                WorldServiceLocator.WorldServer.AccountDatabase.Update(string.Format("UPDATE account SET password='{0}' WHERE id={1}", hashStr, RuntimeHelpers.GetObjectValue(result.Rows[0]["id"])));
+                accountDatabase.Update(string.Format("UPDATE account SET password='{0}' WHERE id={1}", hashStr, RuntimeHelpers.GetObjectValue(result.Rows[0]["id"])));
                 objCharacter.CommandResponse($"Account [{aName}] now has a new password [{aPassword}].");
             }
         }
@@ -1981,7 +2065,7 @@ public class WS_Commands
     }
 
     [ChatCommand("setaccess", "setaccess #account #level - Sets the account to a specific access level.", AccessLevel.Admin)]
-    public bool cmdSetAccess(ref WS_PlayerData.CharacterObject objCharacter, string Message)
+    public bool cmdSetAccess(ref CharacterObject objCharacter, string Message)
     {
         if (Operators.CompareString(Message, "", TextCompare: false) == 0)
         {
@@ -2009,7 +2093,7 @@ public class WS_Commands
             objCharacter.CommandResponse("You cannot set access levels to your own or above your own access level.");
             return true;
         }
-        WorldServiceLocator.WorldServer.AccountDatabase.Query("SELECT id, gmlevel FROM account WHERE username = \"" + aName + "\";", ref result);
+        accountDatabase.Query("SELECT id, gmlevel FROM account WHERE username = \"" + aName + "\";", ref result);
         if (result.Rows.Count == 0)
         {
             objCharacter.CommandResponse($"Account [{aName}] does not exist.");
@@ -2023,7 +2107,7 @@ public class WS_Commands
             }
             else
             {
-                WorldServiceLocator.WorldServer.AccountDatabase.Update(string.Format("UPDATE account SET gmlevel={0} WHERE id={1}", (byte)newLevel, RuntimeHelpers.GetObjectValue(result.Rows[0]["id"])));
+                accountDatabase.Update(string.Format("UPDATE account SET gmlevel={0} WHERE id={1}", (byte)newLevel, RuntimeHelpers.GetObjectValue(result.Rows[0]["id"])));
                 objCharacter.CommandResponse($"Account [{aName}] now has access level [{newLevel}].");
             }
         }
@@ -2033,15 +2117,15 @@ public class WS_Commands
     public ulong GetGUID(string Name)
     {
         DataTable MySQLQuery = new();
-        WorldServiceLocator.WorldServer.CharacterDatabase.Query($"SELECT char_guid FROM characters WHERE char_name = \"{Name}\";", ref MySQLQuery);
+        characterDatabase.Query($"SELECT char_guid FROM characters WHERE char_name = \"{Name}\";", ref MySQLQuery);
         return MySQLQuery.Rows.Count > 0 ? MySQLQuery.Rows[0].As<ulong>("char_guid") : 0uL;
     }
 
     public void SystemMessage(string Message)
     {
-        var packet = WorldServiceLocator.Functions.BuildChatMessage(0uL, "System Message: " + Message, ChatMsg.CHAT_MSG_SYSTEM, LANGUAGES.LANG_GLOBAL, 0, "");
+        var packet = Globals.Functions.BuildChatMessage(logger, 0uL, "System Message: " + Message, ChatMsg.CHAT_MSG_SYSTEM, LANGUAGES.LANG_GLOBAL, 0, "");
         packet.UpdateLength();
-        WorldServiceLocator.WorldServer.ClsWorldServer.Cluster.Broadcast(packet.Data);
+        cluster.Broadcast(packet.Data);
         packet.Dispose();
     }
 
@@ -2053,31 +2137,31 @@ public class WS_Commands
             Packets.PacketClass packet = new(Opcodes.SMSG_UPDATE_OBJECT);
             packet.AddInt32(1);
             packet.AddInt8(0);
-            Packets.UpdateClass UpdateData = new(WorldServiceLocator.GlobalConstants.FIELD_MASK_SIZE_PLAYER);
+            var UpdateData = updateClassFactory.Create(MangosGlobalConstants.FIELD_MASK_SIZE_PLAYER);
             UpdateData.SetUpdateFlag(Index, Value);
-            if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(GUID))
+            if (LegacyGlobalFunctions.GuidIsCreature(GUID))
             {
                 ulong key;
                 Dictionary<ulong, WS_Creatures.CreatureObject> WORLD_CREATUREs;
-                var updateObject = (WORLD_CREATUREs = WorldServiceLocator.WorldServer.WORLD_CREATUREs)[key = GUID];
+                var updateObject = (WORLD_CREATUREs = worldState.WorldCreatures)[key = GUID];
                 UpdateData.AddToPacket(ref packet, ObjectUpdateType.UPDATETYPE_VALUES, ref updateObject);
                 WORLD_CREATUREs[key] = updateObject;
             }
-            else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(GUID))
+            else if (LegacyGlobalFunctions.GuidIsPlayer(GUID))
             {
                 if (GUID == client.Character.GUID)
                 {
                     ulong key;
-                    Dictionary<ulong, WS_PlayerData.CharacterObject> CHARACTERs;
-                    var updateObject2 = (CHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[key = GUID];
+                    Dictionary<ulong, CharacterObject> CHARACTERs;
+                    var updateObject2 = (CHARACTERs = worldState.Characters)[key = GUID];
                     UpdateData.AddToPacket(ref packet, ObjectUpdateType.UPDATETYPE_VALUES, ref updateObject2);
                     CHARACTERs[key] = updateObject2;
                 }
                 else
                 {
                     ulong key;
-                    Dictionary<ulong, WS_PlayerData.CharacterObject> CHARACTERs;
-                    var updateObject2 = (CHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[key = GUID];
+                    Dictionary<ulong, CharacterObject> CHARACTERs;
+                    var updateObject2 = (CHARACTERs = worldState.Characters)[key = GUID];
                     UpdateData.AddToPacket(ref packet, ObjectUpdateType.UPDATETYPE_VALUES, ref updateObject2);
                     CHARACTERs[key] = updateObject2;
                 }
@@ -2088,7 +2172,7 @@ public class WS_Commands
         }
         catch (DataException ex)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "WS_Commands: SetUpdateValue DataException", ex);
+            logger.LogWarning(ex, "WS_Commands: SetUpdateValue DataException");
             noErrors = false;
         }
         return noErrors;

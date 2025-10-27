@@ -16,37 +16,56 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy;
+using Mangos.World.DataStores;
 using Mangos.World.Globals;
 using Mangos.World.Network;
-using System.Collections.Generic;
+using Microsoft.Extensions.Logging;
 
 namespace Mangos.World.Handlers;
 
 public class WS_Handlers_Battleground
 {
+    private readonly ILogger<WS_Handlers_Battleground> logger;
+    private readonly ICluster cluster;
+    private readonly WorldState worldState;
+    private readonly WS_DBCDatabase database;
+
+    public WS_Handlers_Battleground(
+        ILogger<WS_Handlers_Battleground> logger,
+        ICluster cluster,
+        WorldState worldState,
+        WS_DBCDatabase database)
+    {
+        this.logger = logger;
+        this.cluster = cluster;
+        this.worldState = worldState;
+        this.database = database;
+    }
+
     public void On_CMSG_BATTLEMASTER_HELLO(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
         if (checked(packet.Data.Length - 1) < 13)
         {
             return;
         }
+
         packet.GetInt16();
         var GUID = packet.GetUInt64();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BATTLEMASTER_HELLO [{2:X}]", client.IP, client.Port, GUID);
-        if (!WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(GUID) || (WorldServiceLocator.WorldServer.WORLD_CREATUREs[GUID].CreatureInfo.cNpcFlags & 0x800) == 0 || !WorldServiceLocator.WSDBCDatabase.Battlemasters.ContainsKey(WorldServiceLocator.WorldServer.WORLD_CREATUREs[GUID].ID))
+        logger.LogDebug("[{0}:{1}] CMSG_BATTLEMASTER_HELLO [{2:X}]", client.IP, client.Port, GUID);
+        if (!worldState.WorldCreatures.ContainsKey(GUID) || (worldState.WorldCreatures[GUID].CreatureInfo.cNpcFlags & 0x800) == 0 || !database.Battlemasters.ContainsKey(worldState.WorldCreatures[GUID].ID))
         {
             return;
         }
-        var BGType = WorldServiceLocator.WSDBCDatabase.Battlemasters[WorldServiceLocator.WorldServer.WORLD_CREATUREs[GUID].ID];
-        if (!WorldServiceLocator.WSDBCDatabase.Battlegrounds.ContainsKey(BGType))
+        var BGType = database.Battlemasters[worldState.WorldCreatures[GUID].ID];
+        if (!database.Battlegrounds.ContainsKey(BGType))
         {
             return;
         }
-        if (WorldServiceLocator.WSDBCDatabase.Battlegrounds[BGType].MinLevel > (uint)client.Character.Level || WorldServiceLocator.WSDBCDatabase.Battlegrounds[BGType].MaxLevel < (uint)client.Character.Level)
+        if (database.Battlegrounds[BGType].MinLevel > (uint)client.Character.Level || database.Battlegrounds[BGType].MaxLevel < (uint)client.Character.Level)
         {
-            WorldServiceLocator.Functions.SendMessageNotification(ref client, "You don't meet Battleground level requirements");
+            Globals.Functions.SendMessageNotification(ref client, "You don't meet Battleground level requirements");
             return;
         }
         Packets.PacketClass response = new(Opcodes.SMSG_BATTLEFIELD_LIST);
@@ -55,7 +74,7 @@ public class WS_Handlers_Battleground
             response.AddUInt64(client.Character.GUID);
             response.AddInt32(BGType);
             response.AddInt8(0);
-            var Battlegrounds = WorldServiceLocator.WorldServer.ClsWorldServer.Cluster.BattlefieldList(BGType);
+            var Battlegrounds = cluster.BattlefieldList(BGType);
             response.AddInt32(Battlegrounds.Count);
             foreach (var Instance in Battlegrounds)
             {

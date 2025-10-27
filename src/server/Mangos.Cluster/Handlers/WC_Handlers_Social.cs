@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Globals;
 using Mangos.Cluster.Network;
 using Mangos.Common.Enums.Global;
@@ -32,18 +33,20 @@ namespace Mangos.Cluster.Handlers;
 
 public class WcHandlersSocial
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly LegacyWorldCluster cluster;
+    private readonly WsDbcDatabase database;
 
-    public WcHandlersSocial(ClusterServiceLocator clusterServiceLocator)
+    public WcHandlersSocial(LegacyWorldCluster cluster, WsDbcDatabase database)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.cluster = cluster;
+        this.database = database;
     }
 
     public void LoadIgnoreList(WcHandlerCharacter.CharacterObject objCharacter)
     {
         // DONE: Query DB
         DataTable q = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND flags = {1};", objCharacter.Guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
+        database.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND flags = {1};", objCharacter.Guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
 
         // DONE: Add to list
         foreach (DataRow row in q.Rows)
@@ -56,7 +59,7 @@ public class WcHandlersSocial
     {
         // DONE: Query DB
         DataTable q = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND (flags & {1}) > 0;", character.Guid, Conversions.ToInteger(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
+        database.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND (flags & {1}) > 0;", character.Guid, Conversions.ToInteger(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
 
         // DONE: Make the packet
         PacketClass smsgFriendList = new(Opcodes.SMSG_FRIEND_LIST);
@@ -67,13 +70,13 @@ public class WcHandlersSocial
             {
                 var guid = row.As<ulong>("friend");
                 smsgFriendList.AddUInt64(guid);                    // Player GUID
-                if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid) && _clusterServiceLocator.WorldCluster.CharacteRs[guid].IsInWorld)
+                if (cluster.CharacteRs.ContainsKey(guid) && cluster.CharacteRs[guid].IsInWorld)
                 {
-                    if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].Dnd)
+                    if (cluster.CharacteRs[guid].Dnd)
                     {
                         smsgFriendList.AddInt8((byte)FriendStatus.FRIEND_STATUS_DND);
                     }
-                    else if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].Afk)
+                    else if (cluster.CharacteRs[guid].Afk)
                     {
                         smsgFriendList.AddInt8((byte)FriendStatus.FRIEND_STATUS_AFK);
                     }
@@ -82,9 +85,9 @@ public class WcHandlersSocial
                         smsgFriendList.AddInt8((byte)FriendStatus.FRIEND_STATUS_ONLINE);
                     }
 
-                    smsgFriendList.AddInt32((int)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Zone);    // Area
-                    smsgFriendList.AddInt32(_clusterServiceLocator.WorldCluster.CharacteRs[guid].Level);   // Level
-                    smsgFriendList.AddInt32((int)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Classe);  // Class
+                    smsgFriendList.AddInt32((int)cluster.CharacteRs[guid].Zone);    // Area
+                    smsgFriendList.AddInt32(cluster.CharacteRs[guid].Level);   // Level
+                    smsgFriendList.AddInt32((int)cluster.CharacteRs[guid].Classe);  // Class
                 }
                 else
                 {
@@ -99,14 +102,14 @@ public class WcHandlersSocial
 
         client.Send(smsgFriendList);
         smsgFriendList.Dispose();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_LIST", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_LIST", client.IP, client.Port);
     }
 
     public void SendIgnoreList(ClientClass client, WcHandlerCharacter.CharacterObject character)
     {
         // DONE: Query DB
         DataTable q = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND (flags & {1}) > 0;", character.Guid, Conversions.ToInteger(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
+        database.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND (flags & {1}) > 0;", character.Guid, Conversions.ToInteger(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
 
         // DONE: Make the packet
         PacketClass smsgIgnoreList = new(Opcodes.SMSG_IGNORE_LIST);
@@ -125,13 +128,13 @@ public class WcHandlersSocial
 
         client.Send(smsgIgnoreList);
         smsgIgnoreList.Dispose();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_IGNORE_LIST", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_IGNORE_LIST", client.IP, client.Port);
     }
 
     public void NotifyFriendStatus(WcHandlerCharacter.CharacterObject objCharacter, FriendStatus s)
     {
         DataTable q = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT guid FROM character_social WHERE friend = {0} AND (flags & {1}) > 0;", objCharacter.Guid, Conversions.ToInteger(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
+        database.GetCharacterDatabase().Query(string.Format("SELECT guid FROM character_social WHERE friend = {0} AND (flags & {1}) > 0;", objCharacter.Guid, Conversions.ToInteger(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
 
         // DONE: Send "Friend offline/online"
         PacketClass friendpacket = new(Opcodes.SMSG_FRIEND_STATUS);
@@ -140,9 +143,9 @@ public class WcHandlersSocial
         foreach (DataRow row in q.Rows)
         {
             var guid = row.As<ulong>("guid");
-            if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid) && _clusterServiceLocator.WorldCluster.CharacteRs[guid].Client is not null)
+            if (cluster.CharacteRs.ContainsKey(guid) && cluster.CharacteRs[guid].Client is not null)
             {
-                _clusterServiceLocator.WorldCluster.CharacteRs[guid].Client.SendMultiplyPackets(friendpacket);
+                cluster.CharacteRs[guid].Client.SendMultiplyPackets(friendpacket);
             }
         }
 
@@ -154,8 +157,8 @@ public class WcHandlersSocial
         packet.GetInt16();
         var levelMinimum = packet.GetUInt32();       // 0
         var levelMaximum = packet.GetUInt32();       // 100
-        var namePlayer = _clusterServiceLocator.Functions.EscapeString(packet.GetString());
-        var nameGuild = _clusterServiceLocator.Functions.EscapeString(packet.GetString());
+        var namePlayer = GlobalFunctions.EscapeString(packet.GetString());
+        var nameGuild = GlobalFunctions.EscapeString(packet.GetString());
         var maskRace = packet.GetUInt32();
         var maskClass = packet.GetUInt32();
         var zonesCount = packet.GetUInt32();         // Limited to 10
@@ -179,32 +182,32 @@ public class WcHandlersSocial
         List<string> strings = new();
         for (int i = 1, loopTo1 = (int)stringsCount; i <= loopTo1; i++)
         {
-            strings.Add(_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(_clusterServiceLocator.Functions.EscapeString(packet.GetString())));
+            strings.Add(StringFormatFunctions.UppercaseFirstLetter(GlobalFunctions.EscapeString(packet.GetString())));
         }
 
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_WHO [P:'{2}' G:'{3}' L:{4}-{5} C:{6:X} R:{7:X}]", client.IP, client.Port, namePlayer, nameGuild, levelMinimum, levelMaximum, maskClass, maskRace);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_WHO [P:'{2}' G:'{3}' L:{4}-{5} C:{6:X} R:{7:X}]", client.IP, client.Port, namePlayer, nameGuild, levelMinimum, levelMaximum, maskClass, maskRace);
 
         // TODO: Don't show GMs?
         List<ulong> results = new();
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.AcquireReaderLock(_clusterServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-        foreach (var objCharacter in _clusterServiceLocator.WorldCluster.CharacteRs)
+        cluster.CharacteRsLock.AcquireReaderLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
+        foreach (var objCharacter in cluster.CharacteRs)
         {
             if (!objCharacter.Value.IsInWorld)
             {
                 continue;
             }
 
-            if (_clusterServiceLocator.Functions.GetCharacterSide((byte)objCharacter.Value.Race) != _clusterServiceLocator.Functions.GetCharacterSide((byte)client.Character.Race) && client.Character.Access < AccessLevel.GameMaster)
+            if (GlobalFunctions.GetCharacterSide((byte)objCharacter.Value.Race) != GlobalFunctions.GetCharacterSide((byte)client.Character.Race) && client.Character.Access < AccessLevel.GameMaster)
             {
                 continue;
             }
 
-            if (!string.IsNullOrEmpty(namePlayer) && !_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(objCharacter.Value.Name).Contains(_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(namePlayer)))
+            if (!string.IsNullOrEmpty(namePlayer) && !StringFormatFunctions.UppercaseFirstLetter(objCharacter.Value.Name).Contains(StringFormatFunctions.UppercaseFirstLetter(namePlayer)))
             {
                 continue;
             }
 
-            if (!string.IsNullOrEmpty(nameGuild) && (objCharacter.Value.Guild is null || !_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(objCharacter.Value.Guild.Name).Contains(_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(nameGuild))))
+            if (!string.IsNullOrEmpty(nameGuild) && (objCharacter.Value.Guild is null || !StringFormatFunctions.UppercaseFirstLetter(objCharacter.Value.Guild.Name).Contains(StringFormatFunctions.UppercaseFirstLetter(nameGuild))))
             {
                 continue;
             }
@@ -229,22 +232,22 @@ public class WcHandlersSocial
                 var passedStrings = true;
                 foreach (var stringValue in strings)
                 {
-                    if (_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(objCharacter.Value.Name).IndexOf(stringValue, StringComparison.Ordinal) != -1)
+                    if (StringFormatFunctions.UppercaseFirstLetter(objCharacter.Value.Name).IndexOf(stringValue, StringComparison.Ordinal) != -1)
                     {
                         continue;
                     }
 
-                    if (_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(_clusterServiceLocator.Functions.GetRaceName((int)objCharacter.Value.Race)) == stringValue)
+                    if (StringFormatFunctions.UppercaseFirstLetter(GlobalFunctions.GetRaceName((int)objCharacter.Value.Race)) == stringValue)
                     {
                         continue;
                     }
 
-                    if (_clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(_clusterServiceLocator.Functions.GetClassName((int)objCharacter.Value.Classe)) == stringValue)
+                    if (StringFormatFunctions.UppercaseFirstLetter(GlobalFunctions.GetClassName((int)objCharacter.Value.Classe)) == stringValue)
                     {
                         continue;
                     }
 
-                    if (objCharacter.Value.Guild is not null && _clusterServiceLocator.CommonFunctions.UppercaseFirstLetter(objCharacter.Value.Guild.Name).IndexOf(stringValue, StringComparison.Ordinal) != -1)
+                    if (objCharacter.Value.Guild is not null && StringFormatFunctions.UppercaseFirstLetter(objCharacter.Value.Guild.Name).IndexOf(stringValue, StringComparison.Ordinal) != -1)
                     {
                         continue;
                     }
@@ -273,23 +276,23 @@ public class WcHandlersSocial
         response.AddInt32(results.Count);
         foreach (var guid in results)
         {
-            response.AddString(_clusterServiceLocator.WorldCluster.CharacteRs[guid].Name);           // Name
-            if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].Guild is not null)
+            response.AddString(cluster.CharacteRs[guid].Name);           // Name
+            if (cluster.CharacteRs[guid].Guild is not null)
             {
-                response.AddString(_clusterServiceLocator.WorldCluster.CharacteRs[guid].Guild.Name); // Guild Name
+                response.AddString(cluster.CharacteRs[guid].Guild.Name); // Guild Name
             }
             else
             {
                 response.AddString("");
             }                          // Guild Name
 
-            response.AddInt32(_clusterServiceLocator.WorldCluster.CharacteRs[guid].Level);           // Level
-            response.AddInt32((int)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Classe);          // Class
-            response.AddInt32((int)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Race);            // Race
-            response.AddInt32((int)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Zone);            // Zone ID
+            response.AddInt32(cluster.CharacteRs[guid].Level);           // Level
+            response.AddInt32((int)cluster.CharacteRs[guid].Classe);          // Class
+            response.AddInt32((int)cluster.CharacteRs[guid].Race);            // Race
+            response.AddInt32((int)cluster.CharacteRs[guid].Zone);            // Zone ID
         }
 
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.ReleaseReaderLock();
+        cluster.CharacteRsLock.ReleaseReaderLock();
         client.Send(response);
         response.Dispose();
     }
@@ -305,20 +308,20 @@ public class WcHandlersSocial
         PacketClass response = new(Opcodes.SMSG_FRIEND_STATUS);
         var name = packet.GetString();
         var guid = 0UL;
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_ADD_FRIEND [{2}]", client.IP, client.Port, name);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_ADD_FRIEND [{2}]", client.IP, client.Port, name);
 
         // DONE: Get GUID from DB
         DataTable q = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT char_guid, char_race FROM characters WHERE char_name = \"{0}\";", name), ref q);
+        database.GetCharacterDatabase().Query(string.Format("SELECT char_guid, char_race FROM characters WHERE char_name = \"{0}\";", name), ref q);
         if (q.Rows.Count > 0)
         {
             guid = (ulong)q.Rows[0].As<long>("char_guid");
-            var friendSide = _clusterServiceLocator.Functions.GetCharacterSide(q.Rows[0].As<byte>("char_race"));
+            var friendSide = GlobalFunctions.GetCharacterSide(q.Rows[0].As<byte>("char_race"));
             q.Clear();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE flags = {0}", Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
+            database.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE flags = {0}", Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
             var numberOfFriends = q.Rows.Count;
             q.Clear();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE guid = {0} AND friend = {1} AND flags = {2};", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
+            database.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE guid = {0} AND friend = {1} AND flags = {2};", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)), ref q);
             if (guid == client.Character.Guid)
             {
                 response.AddInt8((byte)FriendResult.FRIEND_SELF);
@@ -334,21 +337,21 @@ public class WcHandlersSocial
                 response.AddInt8((byte)FriendResult.FRIEND_LIST_FULL);
                 response.AddUInt64(guid);
             }
-            else if (_clusterServiceLocator.Functions.GetCharacterSide((byte)client.Character.Race) != friendSide)
+            else if (GlobalFunctions.GetCharacterSide((byte)client.Character.Race) != friendSide)
             {
                 response.AddInt8((byte)FriendResult.FRIEND_ENEMY);
                 response.AddUInt64(guid);
             }
-            else if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid))
+            else if (cluster.CharacteRs.ContainsKey(guid))
             {
                 response.AddInt8((byte)FriendResult.FRIEND_ADDED_ONLINE);
                 response.AddUInt64(guid);
                 response.AddString(name);
-                if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].Dnd)
+                if (cluster.CharacteRs[guid].Dnd)
                 {
                     response.AddInt8((byte)FriendStatus.FRIEND_STATUS_DND);
                 }
-                else if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].Afk)
+                else if (cluster.CharacteRs[guid].Afk)
                 {
                     response.AddInt8((byte)FriendStatus.FRIEND_STATUS_AFK);
                 }
@@ -357,17 +360,17 @@ public class WcHandlersSocial
                     response.AddInt8((byte)FriendStatus.FRIEND_STATUS_ONLINE);
                 }
 
-                response.AddInt32((int)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Zone);
-                response.AddInt32(_clusterServiceLocator.WorldCluster.CharacteRs[guid].Level);
-                response.AddInt32((int)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Classe);
-                _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("INSERT INTO character_social (guid, friend, flags) VALUES ({0}, {1}, {2});", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)));
+                response.AddInt32((int)cluster.CharacteRs[guid].Zone);
+                response.AddInt32(cluster.CharacteRs[guid].Level);
+                response.AddInt32((int)cluster.CharacteRs[guid].Classe);
+                database.GetCharacterDatabase().Update(string.Format("INSERT INTO character_social (guid, friend, flags) VALUES ({0}, {1}, {2});", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)));
             }
             else
             {
                 response.AddInt8((byte)FriendResult.FRIEND_ADDED_OFFLINE);
                 response.AddUInt64(guid);
                 response.AddString(name);
-                _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("INSERT INTO character_social (guid, friend, flags) VALUES ({0}, {1}, {2});", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)));
+                database.GetCharacterDatabase().Update(string.Format("INSERT INTO character_social (guid, friend, flags) VALUES ({0}, {1}, {2});", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_FRIEND)));
             }
         }
         else
@@ -379,7 +382,7 @@ public class WcHandlersSocial
         client.Send(response);
         response.Dispose();
         q.Dispose();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
     }
 
     public void On_CMSG_ADD_IGNORE(PacketClass packet, ClientClass client)
@@ -393,19 +396,19 @@ public class WcHandlersSocial
         PacketClass response = new(Opcodes.SMSG_FRIEND_STATUS);
         var name = packet.GetString();
         var guid = 0UL;
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_ADD_IGNORE [{2}]", client.IP, client.Port, name);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_ADD_IGNORE [{2}]", client.IP, client.Port, name);
 
         // DONE: Get GUID from DB
         DataTable q = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT char_guid FROM characters WHERE char_name = \"{0}\";", name), ref q);
+        database.GetCharacterDatabase().Query(string.Format("SELECT char_guid FROM characters WHERE char_name = \"{0}\";", name), ref q);
         if (q.Rows.Count > 0)
         {
             guid = (ulong)q.Rows[0].As<long>("char_guid");
             q.Clear();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE flags = {0}", Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
+            database.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE flags = {0}", Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
             var numberOfFriends = q.Rows.Count;
             q.Clear();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND friend = {1} AND flags = {2};", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
+            database.GetCharacterDatabase().Query(string.Format("SELECT * FROM character_social WHERE guid = {0} AND friend = {1} AND flags = {2};", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)), ref q);
             if (guid == client.Character.Guid)
             {
                 response.AddInt8((byte)FriendResult.FRIEND_IGNORE_SELF);
@@ -425,7 +428,7 @@ public class WcHandlersSocial
             {
                 response.AddInt8((byte)FriendResult.FRIEND_IGNORE_ADDED);
                 response.AddUInt64(guid);
-                _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("INSERT INTO character_social (guid, friend, flags) VALUES ({0}, {1}, {2});", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)));
+                database.GetCharacterDatabase().Update(string.Format("INSERT INTO character_social (guid, friend, flags) VALUES ({0}, {1}, {2});", client.Character.Guid, guid, Conversions.ToByte(SocialFlag.SOCIAL_FLAG_IGNORED)));
                 client.Character.IgnoreList.Add(guid);
             }
         }
@@ -438,12 +441,12 @@ public class WcHandlersSocial
         client.Send(response);
         response.Dispose();
         q.Dispose();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
     }
 
     public void On_CMSG_DEL_FRIEND(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_DEL_FRIEND", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_DEL_FRIEND", client.IP, client.Port);
         if (packet.Data.Length - 1 < 13)
         {
             return;
@@ -455,18 +458,18 @@ public class WcHandlersSocial
         try
         {
             DataTable q = new();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE guid = {0} AND friend = {1};", client.Character.Guid, guid), ref q);
+            database.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE guid = {0} AND friend = {1};", client.Character.Guid, guid), ref q);
             if (q.Rows.Count > 0)
             {
                 var flags = q.Rows[0].As<int>("flags");
                 var newFlags = (SocialFlag)flags ^ SocialFlag.SOCIAL_FLAG_FRIEND;
                 if ((newFlags & (SocialFlag.SOCIAL_FLAG_FRIEND | SocialFlag.SOCIAL_FLAG_IGNORED)) == 0)
                 {
-                    _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("DELETE FROM character_social WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid));
+                    database.GetCharacterDatabase().Update(string.Format("DELETE FROM character_social WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid));
                 }
                 else
                 {
-                    _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("UPDATE character_social SET flags = {2} WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid, newFlags));
+                    database.GetCharacterDatabase().Update(string.Format("UPDATE character_social SET flags = {2} WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid, newFlags));
                 }
 
                 response.AddInt8((byte)FriendResult.FRIEND_REMOVED);
@@ -484,12 +487,12 @@ public class WcHandlersSocial
         response.AddUInt64(guid);
         client.Send(response);
         response.Dispose();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
     }
 
     public void On_CMSG_DEL_IGNORE(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_DEL_IGNORE", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_DEL_IGNORE", client.IP, client.Port);
         if (packet.Data.Length - 1 < 13)
         {
             return;
@@ -501,18 +504,18 @@ public class WcHandlersSocial
         try
         {
             DataTable q = new();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE guid = {0} AND friend = {1};", client.Character.Guid, guid), ref q);
+            database.GetCharacterDatabase().Query(string.Format("SELECT flags FROM character_social WHERE guid = {0} AND friend = {1};", client.Character.Guid, guid), ref q);
             if (q.Rows.Count > 0)
             {
                 var flags = q.Rows[0].As<int>("flags");
                 var newFlags = (SocialFlag)flags ^ SocialFlag.SOCIAL_FLAG_IGNORED;
                 if ((newFlags & (SocialFlag.SOCIAL_FLAG_FRIEND | SocialFlag.SOCIAL_FLAG_IGNORED)) == 0)
                 {
-                    _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("DELETE FROM character_social WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid));
+                    database.GetCharacterDatabase().Update(string.Format("DELETE FROM character_social WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid));
                 }
                 else
                 {
-                    _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("UPDATE character_social SET flags = {2} WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid, newFlags));
+                    database.GetCharacterDatabase().Update(string.Format("UPDATE character_social SET flags = {2} WHERE friend = {1} AND guid = {0};", client.Character.Guid, guid, newFlags));
                 }
 
                 response.AddInt8((byte)FriendResult.FRIEND_IGNORE_REMOVED);
@@ -530,12 +533,12 @@ public class WcHandlersSocial
         response.AddUInt64(guid);
         client.Send(response);
         response.Dispose();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_FRIEND_STATUS", client.IP, client.Port);
     }
 
     public void On_CMSG_FRIEND_LIST(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_FRIEND_LIST", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_FRIEND_LIST", client.IP, client.Port);
         SendFriendList(client, client.Character);
         SendIgnoreList(client, client.Character);
     }

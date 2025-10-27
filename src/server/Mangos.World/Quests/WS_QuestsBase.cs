@@ -16,11 +16,11 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Globals;
 using Mangos.World.Globals;
-using Mangos.World.Objects;
+using Mangos.World.Objects.Factories;
 using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using System;
 
@@ -67,12 +67,11 @@ public class WS_QuestsBase : IDisposable
     public int TimeEnd;
 
     private bool _disposedValue;
+    private readonly ILogger<WS_QuestsBase> logger;
+    private readonly WorldState worldState;
+    private readonly ItemObjectFactory itemObjectFactory;
 
-    public WS_QuestsBase()
-    {
-    }
-
-    public WS_QuestsBase(WS_QuestInfo Quest)
+    public WS_QuestsBase(ILogger<WS_QuestsBase> logger, WorldState worldState, WS_QuestInfo Quest, ItemObjectFactory itemObjectFactory)
     {
         ID = 0;
         Title = "";
@@ -203,12 +202,16 @@ public class WS_QuestsBase : IDisposable
             ObjectivesDeliver = Quest.ObjectivesDeliver;
             if (Quest.TimeLimit > 0)
             {
-                TimeEnd = (int)(WorldServiceLocator.Functions.GetTimestamp(DateAndTime.Now) + Quest.TimeLimit);
+                TimeEnd = (int)(Globals.Functions.GetTimestamp(DateAndTime.Now) + Quest.TimeLimit);
             }
         }
+
+        this.logger = logger;
+        this.worldState = worldState;
+        this.itemObjectFactory = itemObjectFactory;
     }
 
-    public void UpdateItemCount(ref WS_PlayerData.CharacterObject objCharacter)
+    public void UpdateItemCount(ref CharacterObject objCharacter)
     {
         byte i = 0;
         do
@@ -218,7 +221,7 @@ public class WS_QuestsBase : IDisposable
                 if (ObjectivesItem[i] != 0)
                 {
                     ProgressItem[i] = (byte)objCharacter.ItemCOUNT(ObjectivesItem[i]);
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "ITEM COUNT UPDATED TO: {0}", ProgressItem[i]);
+                    logger.LogDebug("ITEM COUNT UPDATED TO: {0}", ProgressItem[i]);
                 }
                 i = (byte)unchecked((uint)(i + 1));
             }
@@ -231,11 +234,11 @@ public class WS_QuestsBase : IDisposable
         IsCompleted();
     }
 
-    public void Initialize(ref WS_PlayerData.CharacterObject objCharacter)
+    public void Initialize(ref CharacterObject objCharacter)
     {
         if (ObjectivesDeliver > 0)
         {
-            ItemObject tmpItem = new(ObjectivesDeliver, objCharacter.GUID);
+            var tmpItem = itemObjectFactory.Create(ObjectivesDeliver, objCharacter.GUID);
             if (!objCharacter.ItemADD(ref tmpItem))
             {
                 tmpItem.Delete();
@@ -345,48 +348,48 @@ public class WS_QuestsBase : IDisposable
         }
     }
 
-    public void AddKill(WS_PlayerData.CharacterObject objCharacter, byte index, ulong oGUID)
+    public void AddKill(CharacterObject objCharacter, byte index, ulong oGUID)
     {
         checked
         {
             Progress[index]++;
             IsCompleted();
             objCharacter.TalkUpdateQuest(Slot);
-            WorldServiceLocator.WorldServer.ALLQUESTS.SendQuestMessageAddKill(ref objCharacter.client, ID, oGUID, ObjectivesObject[index], Progress[index], ObjectivesCount[index]);
+            worldState.QuestsService.SendQuestMessageAddKill(ref objCharacter.client, ID, oGUID, ObjectivesObject[index], Progress[index], ObjectivesCount[index]);
         }
     }
 
-    public void AddCast(WS_PlayerData.CharacterObject objCharacter, byte index, ulong oGUID)
+    public void AddCast(CharacterObject objCharacter, byte index, ulong oGUID)
     {
         checked
         {
             Progress[index]++;
             IsCompleted();
             objCharacter.TalkUpdateQuest(Slot);
-            WorldServiceLocator.WorldServer.ALLQUESTS.SendQuestMessageAddKill(ref objCharacter.client, ID, oGUID, ObjectivesObject[index], Progress[index], ObjectivesCount[index]);
+            worldState.QuestsService.SendQuestMessageAddKill(ref objCharacter.client, ID, oGUID, ObjectivesObject[index], Progress[index], ObjectivesCount[index]);
         }
     }
 
-    public void AddExplore(WS_PlayerData.CharacterObject objCharacter)
+    public void AddExplore(CharacterObject objCharacter)
     {
         Explored = true;
         IsCompleted();
         objCharacter.TalkUpdateQuest(Slot);
-        WorldServiceLocator.WorldServer.ALLQUESTS.SendQuestMessageComplete(ref objCharacter.client, ID);
+        worldState.QuestsService.SendQuestMessageComplete(ref objCharacter.client, ID);
     }
 
-    public void AddEmote(WS_PlayerData.CharacterObject objCharacter, byte index)
+    public void AddEmote(CharacterObject objCharacter, byte index)
     {
         checked
         {
             Progress[index]++;
             IsCompleted();
             objCharacter.TalkUpdateQuest(Slot);
-            WorldServiceLocator.WorldServer.ALLQUESTS.SendQuestMessageComplete(ref objCharacter.client, ID);
+            worldState.QuestsService.SendQuestMessageComplete(ref objCharacter.client, ID);
         }
     }
 
-    public void AddItem(WS_PlayerData.CharacterObject objCharacter, byte index, byte Count)
+    public void AddItem(CharacterObject objCharacter, byte index, byte Count)
     {
         if (checked((byte)unchecked((uint)(ProgressItem[index] + Count))) > (uint)ObjectivesItemCount[index])
         {
@@ -402,11 +405,11 @@ public class WS_QuestsBase : IDisposable
             IsCompleted();
             objCharacter.TalkUpdateQuest(Slot);
             var ItemCount = Count - 1;
-            WorldServiceLocator.WorldServer.ALLQUESTS.SendQuestMessageAddItem(ref objCharacter.client, ObjectivesItem[index], ItemCount);
+            worldState.QuestsService.SendQuestMessageAddItem(ref objCharacter.client, ObjectivesItem[index], ItemCount);
         }
     }
 
-    public void RemoveItem(WS_PlayerData.CharacterObject objCharacter, byte index, byte Count)
+    public void RemoveItem(CharacterObject objCharacter, byte index, byte Count)
     {
         checked
         {

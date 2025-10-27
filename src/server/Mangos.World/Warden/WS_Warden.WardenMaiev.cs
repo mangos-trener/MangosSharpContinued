@@ -16,10 +16,10 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.World.Globals;
 using Mangos.World.Handlers;
 using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
@@ -194,7 +194,7 @@ public partial class WS_Warden
         private int m_Mod;
 
         private readonly int m_ModMem;
-
+        private readonly ILogger<WardenMaiev> logger;
         private int InitPointer;
 
         private IntPtr myFuncList;
@@ -215,7 +215,7 @@ public partial class WS_Warden
 
         private bool _disposedValue;
 
-        public WardenMaiev()
+        public WardenMaiev(ILogger<WardenMaiev> logger)
         {
             WardenModule = Array.Empty<byte>();
             ModuleName = "";
@@ -246,6 +246,7 @@ public partial class WS_Warden
             pWardenList = 0;
             m_RC4 = 0;
             m_PKT = Array.Empty<byte>();
+            this.logger = logger;
         }
 
         public void InitWarden()
@@ -266,11 +267,11 @@ public partial class WS_Warden
             ModuleData = File.ReadAllBytes("warden\\" + ModuleName + ".bin");
             if (LoadModule(ModuleName, ref ModuleData, ModuleKey))
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.SUCCESS, "[WARDEN] Load of module, success [{0}]", ModuleName);
+                logger.LogInformation("[WARDEN] Load of module, success [{0}]", ModuleName);
             }
             else
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Failed to load module [{0}]", ModuleName);
+                logger.LogCritical("[WARDEN] Failed to load module [{0}]", ModuleName);
             }
         }
 
@@ -281,7 +282,7 @@ public partial class WS_Warden
             var UncompressedLen = BitConverter.ToInt32(Data, 0);
             if (UncompressedLen < 0)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Failed to decrypt {0}, incorrect length.", Name);
+                logger.LogCritical("[WARDEN] Failed to decrypt {0}, incorrect length.", Name);
                 return false;
             }
             checked
@@ -292,7 +293,7 @@ public partial class WS_Warden
                 var Sign = Conversions.ToString(Strings.Chr(Data[dataPos + 3])) + Conversions.ToString(Strings.Chr(Data[dataPos + 2])) + Conversions.ToString(Strings.Chr(Data[dataPos + 1])) + Conversions.ToString(Strings.Chr(Data[dataPos]));
                 if (Operators.CompareString(Sign, "SIGN", TextCompare: false) != 0)
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Failed to decrypt {0}, sign missing.", Name);
+                    logger.LogCritical("[WARDEN] Failed to decrypt {0}, sign missing.", Name);
                     return false;
                 }
                 dataPos += 4;
@@ -300,7 +301,7 @@ public partial class WS_Warden
                 Array.Copy(Data, dataPos, Signature, 0, Signature.Length);
                 if (!CheckSignature(Signature, Data, Data.Length - 260))
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Signature fail on Warden Module.");
+                    logger.LogCritical("[WARDEN] Signature fail on Warden Module.");
                     return false;
                 }
                 var DecompressedData = WorldServiceLocator.GlobalZip.DeCompress(CompressedData);
@@ -308,7 +309,7 @@ public partial class WS_Warden
                 {
                     return false;
                 }
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.SUCCESS, "[WARDEN] Successfully prepaired Warden Module.");
+                logger.LogInformation("[WARDEN] Successfully prepaired Warden Module.");
                 try
                 {
                     if (!InitModule())
@@ -319,7 +320,7 @@ public partial class WS_Warden
                 catch (Exception ex2)
                 {
                     ProjectData.SetProjectError(ex2);
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] InitModule Failed.");
+                    logger.LogCritical("[WARDEN] InitModule Failed.");
                     ProjectData.ClearProjectError();
                 }
                 return true;
@@ -663,8 +664,8 @@ public partial class WS_Warden
                                 dwChunkDest += dwCurrentChunkSize;
                                 bCopyChunk = !bCopyChunk;
                             }
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] Update...");
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] Update: Adjusting references to global variables...");
+                            logger.LogDebug("[WARDEN] Update...");
+                            logger.LogDebug("[WARDEN] Update: Adjusting references to global variables...");
                             var pbRelocationTable = m_Mod + Header.dwSizeOfCode;
                             var dwRelocationIndex = 0;
                             var dwLastRelocation = 0;
@@ -691,14 +692,14 @@ public partial class WS_Warden
                                 dwRelocationIndex++;
                                 dwLastRelocation = dwValue;
                             }
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] Update: Updating API library references...");
+                            logger.LogDebug("[WARDEN] Update: Updating API library references...");
                             var dwLibraryIndex = 0;
                             while (dwLibraryIndex < Header.dwLibraryCount)
                             {
                                 var obj2 = Marshal.PtrToStructure(new IntPtr(m_Mod + Header.dwLibraryTable + (dwLibraryIndex * 8)), typeof(CLibraryEntry));
                                 var pLibraryTable = (obj2 != null) ? ((CLibraryEntry)obj2) : default;
                                 var procLib = Marshal.PtrToStringAnsi(new IntPtr(m_Mod + pLibraryTable.dwFileName));
-                                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "    Library: {0}", procLib);
+                                logger.LogDebug("    Library: {0}", procLib);
                                 var hModule = NativeMethods.LoadLibrary(procLib, "");
                                 if (hModule != 0)
                                 {
@@ -712,7 +713,7 @@ public partial class WS_Warden
                                         {
                                             dwCurrent &= 0x7FFFFFFF;
                                             procAddr = (int)(uint)NativeMethods.GetProcAddress((IntPtr)hModule, Convert.ToString(new IntPtr(dwCurrent)), "");
-                                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "        Ordinary: 0x{0:X8}", dwCurrent);
+                                            logger.LogDebug("        Ordinary: 0x{0:X8}", dwCurrent);
                                         }
                                         else
                                         {
@@ -722,13 +723,13 @@ public partial class WS_Warden
                                             if (procRedirector is null || procDelegate is null)
                                             {
                                                 procAddr = (int)(uint)NativeMethods.GetProcAddress((IntPtr)hModule, procFunc, "");
-                                                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "        Function: {0} @ 0x{1:X8}", procFunc, procAddr);
+                                                logger.LogDebug("        Function: {0} @ 0x{1:X8}", procFunc, procAddr);
                                             }
                                             else
                                             {
                                                 delegateCache.Add(procFunc, Delegate.CreateDelegate(procDelegate, procRedirector));
                                                 procAddr = (int)Marshal.GetFunctionPointerForDelegate(delegateCache[procFunc]);
-                                                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "        Function: {0} @ MY 0x{1:X8}", procFunc, procAddr);
+                                                logger.LogDebug("        Function: {0} @ MY 0x{1:X8}", procFunc, procAddr);
                                             }
                                             Marshal.WriteInt32(new IntPtr(dwImports), procAddr);
                                         }
@@ -773,7 +774,7 @@ public partial class WS_Warden
                 {
                     ProjectData.SetProjectError(ex2);
                     var ex = ex2;
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Failed to prepair module.{0}{1}", Environment.NewLine, ex.ToString());
+                    logger.LogCritical("Failed to prepair module.{0}{1}", Environment.NewLine, ex.ToString());
                     var PrepairModule = false;
                     ProjectData.ClearProjectError();
                     return PrepairModule;
@@ -830,13 +831,13 @@ public partial class WS_Warden
                 Console.WriteLine("Initializing module");
                 try
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.SUCCESS, "[WARDEN] Successfully Initialized Module.");
+                    logger.LogInformation("[WARDEN] Successfully Initialized Module.");
                 }
                 catch (Exception ex2)
                 {
                     ProjectData.SetProjectError(ex2);
                     var ex = ex2;
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Failed to Initialize Module.");
+                    logger.LogCritical("[WARDEN] Failed to Initialize Module.");
                     ProjectData.ClearProjectError();
                 }
                 pWardenList = Marshal.ReadInt32(new IntPtr(m_ModMem));
@@ -941,7 +942,7 @@ public partial class WS_Warden
             return m_PKT;
         }
 
-        public void ReadKeys(ref WS_PlayerData.CharacterObject objCharacter)
+        public void ReadKeys(ref CharacterObject objCharacter)
         {
             var KeyData = new byte[516];
             Marshal.Copy(new IntPtr(checked(m_ModMem + 32)), KeyData, 0, KeyData.Length);
@@ -949,7 +950,7 @@ public partial class WS_Warden
             Buffer.BlockCopy(KeyData, 258, objCharacter.WardenData.KeyIn, 0, 258);
         }
 
-        public void ReadXorByte(ref WS_PlayerData.CharacterObject objCharacter)
+        public void ReadXorByte(ref CharacterObject objCharacter)
         {
             var ClientSeed = new byte[16];
             Marshal.Copy(new IntPtr(checked(m_ModMem + 4)), ClientSeed, 0, ClientSeed.Length);

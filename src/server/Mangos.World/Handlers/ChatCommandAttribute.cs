@@ -18,8 +18,6 @@
 
 using Mangos.Common.Enums.Misc;
 using System;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
 
 namespace Mangos.World.Handlers;
 

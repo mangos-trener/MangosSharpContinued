@@ -16,6 +16,8 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Common.Legacy;
+
 namespace Mangos.World.Network;
 
 public partial class WS_Network
@@ -32,6 +34,6 @@ public partial class WS_Network
 
     public int MsTime()
     {
-        return checked(WC_MsTime + (WorldServiceLocator.NativeMethods.timeGetTime("") - LastPing));
+        return checked(WC_MsTime + (LegacyNativeMethods.TimeGetTime("") - LastPing));
     }
 }

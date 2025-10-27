@@ -16,18 +16,25 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Misc;
 using Mangos.World.Globals;
 using Mangos.World.Network;
+using Microsoft.Extensions.Logging;
 
 namespace Mangos.World.Handlers;
 
 public class WS_Handlers_Gamemaster
 {
+    private readonly ILogger<WS_Handlers_Gamemaster> logger;
+
+    public WS_Handlers_Gamemaster(ILogger<WS_Handlers_Gamemaster> logger)
+    {
+        this.logger = logger;
+    }
+
     public void On_CMSG_WORLD_TELEPORT(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_WORLD_TELEPORT", client.IP, client.Port);
+        logger.LogDebug("[{0}:{1}] CMSG_WORLD_TELEPORT", client.IP, client.Port);
         if (client.Access >= AccessLevel.GameMaster)
         {
             packet.GetInt16();

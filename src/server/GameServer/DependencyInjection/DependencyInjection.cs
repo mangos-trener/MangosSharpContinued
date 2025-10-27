@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2013-2023 getMaNGOS <https://getmangos.eu>
+// Copyright (C) 2013-2025 getMaNGOS <https://www.getmangos.eu>
 //
 // This program is free software. You can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -25,8 +25,11 @@ using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Globals;
 using Mangos.Cluster.Handlers;
 using Mangos.Cluster.Handlers.Guild;
+using Mangos.Cluster.Interfaces;
 using Mangos.Cluster.Network;
-using Mangos.Common.Globals;
+using Mangos.Common.Enums.Global;
+using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Logging;
 using Mangos.Configuration;
 using Mangos.DataStores;
 using Mangos.Logging.DependencyInjection;
@@ -42,15 +45,33 @@ using Mangos.World.Loots;
 using Mangos.World.Maps;
 using Mangos.World.Network;
 using Mangos.World.Objects;
+using Mangos.World.Objects.Factories;
+using Mangos.World.Objects.Factories.Client;
+using Mangos.World.Objects.Factories.Combat;
+using Mangos.World.Objects.Factories.CreaturesAi;
+using Mangos.World.Objects.Factories.Gossip;
+using Mangos.World.Objects.Factories.Groups;
+using Mangos.World.Objects.Factories.Loot;
+using Mangos.World.Objects.Factories.Maps;
+using Mangos.World.Objects.Factories.Packets;
+using Mangos.World.Objects.Factories.Quests;
+using Mangos.World.Objects.Factories.Spells;
+using Mangos.World.Objects.Factories.Warden;
+using Mangos.World.Objects.Factories.Weather;
 using Mangos.World.Player;
+using Mangos.World.Quests;
+using Mangos.World.Scripts;
 using Mangos.World.Server;
+using Mangos.World.Services;
 using Mangos.World.Social;
 using Mangos.World.Spells;
 using Mangos.World.Warden;
 using Mangos.World.Weather;
 using Mangos.Zip;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using static Mangos.World.Warden.WS_Warden;
 
 namespace GameServer.DependencyInjection;
 public static class DependencyInjection
@@ -76,7 +97,33 @@ public static class DependencyInjection
 
     public static IServiceCollection AddCustomLogging(this IServiceCollection services)
     {
-        services.AddMangosLogger();
+        try
+        {
+            services.AddSingleton<ILoggerProvider>(sp =>
+            {
+                var config = sp.GetRequiredService<MangosConfiguration>();
+
+                var writer = BaseWriter.CreateLog(config.World.LogType, config.World.LogConfig);
+                writer.LogLevel = LogType.INFORMATION;
+
+                return new BaseWriterLoggerProvider(writer);
+            });
+
+            //services.AddLogging(builder =>
+            //{
+            //    builder.
+            //    builder.ClearProviders();
+            //    builder.Services.AddSingleton<ILoggerProvider>(sp =>
+            //        sp.GetRequiredService<ILoggerProvider>());
+            //});
+
+            services.AddMangosLogger();
+
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
 
         return services;
     }
@@ -91,6 +138,9 @@ public static class DependencyInjection
     public static IServiceCollection AddTcpServer(this IServiceCollection services)
     {
         services.AddSingleton<TcpServer>();
+        services.AddSingleton<ICluster, WorldServerClass>();
+
+        //services.AddScoped<ITcpConnection>();
 
         return services;
     }
@@ -100,6 +150,13 @@ public static class DependencyInjection
         services.AddScoped<ITcpConnection, GameTcpConnection>();
         services.AddScoped<IGameState, GameState>();
 
+        services.AddSingleton<Mangos.World.Globals.ScriptedObject>();
+        services.AddSingleton<IScriptExecutor>(sp =>
+        {
+            var scriptedObject = sp.GetRequiredService<Mangos.World.Globals.ScriptedObject>();
+            return new ScriptExecutor(scriptedObject);
+        });
+
         services.AddScoped<CMSG_PING_Handler>();
         services.AddScoped<IHandlerDispatcher, HandlerDispatcher<CMSG_PING, CMSG_PING_Handler>>();
 
@@ -108,17 +165,19 @@ public static class DependencyInjection
 
     public static IServiceCollection AddLegacyClusterServices(this IServiceCollection services)
     {
-        services.AddScoped<ClientClass>();
+        services.AddSingleton<ClientClass>();
 
         services.AddSingleton<DataStoreProvider>();
-        services.AddSingleton<MangosGlobalConstants>();
-        services.AddSingleton<Mangos.Common.Legacy.Globals.Functions>();
-        services.AddSingleton<Mangos.Common.Legacy.Functions>();
-        services.AddSingleton<Mangos.Cluster.Globals.Functions>();
+        //services.AddSingleton<MangosGlobalConstants>();
+        //services.AddSingleton<Mangos.Common.Legacy.Globals.GlobalFunctions>();
+        //services.AddSingleton<Mangos.Common.Legacy.StringFormatFunctions>();
+        //services.AddSingleton<Mangos.Cluster.Globals.GlobalFunctions>();
         services.AddSingleton<ZipService>();
         services.AddSingleton<Mangos.World.Warden.NativeMethods>();
         services.AddSingleton<LegacyWorldCluster>();
-        services.AddSingleton<WorldServerClass>();
+        services.AddSingleton<IClusterContext>(sp => sp.GetRequiredService<LegacyWorldCluster>());
+        //services.AddSingleton<LegacyWorldCluster>();
+        //services.AddSingleton<WorldServerClass>();
         services.AddSingleton<WsDbcDatabase>();
         services.AddSingleton<WsDbcLoad>();
         services.AddSingleton<Packets>();
@@ -140,25 +199,19 @@ public static class DependencyInjection
         services.AddSingleton<WcHandlersGuild>();
         services.AddSingleton<WcHandlersGuild>();
 
-        // ClusterServiceLocator: handle circular dependencies manually
-        services.AddSingleton(provider =>
-        {
-            var locator = new ClusterServiceLocator();
-            return locator;
-        });
-
         return services;
     }
 
     public static IServiceCollection AddLegacyWorldServices(this IServiceCollection services)
     {
-        services.AddSingleton<MangosGlobalConstants>();
-        services.AddSingleton<Mangos.Common.Legacy.Globals.Functions>();
-        services.AddSingleton<Mangos.Common.Legacy.Functions>();
+        //services.AddSingleton<MangosGlobalConstants>();
+        //services.AddSingleton<Mangos.Common.Legacy.Globals.GlobalFunctions>();
+        //services.AddSingleton<Mangos.Common.Legacy.StringFormatFunctions>();
+        //services.AddSingleton<Mangos.Common.Legacy.LegacyNativeMethods>();
         services.AddSingleton<ZipService>();
-        services.AddSingleton<Mangos.Common.Legacy.NativeMethods>();
         services.AddSingleton<WorldServer>();
-        services.AddSingleton<Mangos.Cluster.Globals.Functions>();
+        services.AddSingleton<WorldState>();
+        //services.AddSingleton<Mangos.Cluster.Globals.GlobalFunctions>();
         services.AddSingleton<DataStoreProvider>();
 
         services.AddSingleton<Mangos.World.AI.WS_Creatures_AI>();
@@ -176,12 +229,15 @@ public static class DependencyInjection
         services.AddSingleton<WS_GameObjects>();
         services.AddSingleton<WS_Items>();
         services.AddSingleton<WS_NPCs>();
+        services.AddSingleton<IQuestsService, WS_Quests>();
+        services.AddSingleton<WS_Quests>();
         services.AddSingleton<WS_Pets>();
         services.AddSingleton<WS_Transports>();
         services.AddSingleton<CharManagementHandler>();
         services.AddSingleton<WS_CharMovement>();
         services.AddSingleton<WS_Combat>();
         services.AddSingleton<WS_Commands>();
+        services.AddSingleton<WS_Spawns>();
         services.AddSingleton<WS_Handlers>();
         services.AddSingleton<WS_Handlers_Battleground>();
         services.AddSingleton<WS_Handlers_Chat>();
@@ -193,7 +249,6 @@ public static class DependencyInjection
         services.AddSingleton<WS_Handlers_Warden>();
         services.AddSingleton<WS_Player_Creation>();
         services.AddSingleton<WS_Player_Initializator>();
-        services.AddSingleton<WS_PlayerData>();
         services.AddSingleton<WS_PlayerHelper>();
         services.AddSingleton<WS_Network>();
         services.AddSingleton<WS_TimerBasedEvents>();
@@ -203,6 +258,89 @@ public static class DependencyInjection
         services.AddSingleton<WS_Spells>();
         services.AddSingleton<WS_Warden>();
         services.AddSingleton<WS_Weather>();
+        services.AddSingleton<WS_GraveYards>();
+        services.AddSingleton<WS_Network.WorldServerClass>();
+        services.AddSingleton<WS_TimerBasedEvents.TAIManager>();
+        services.AddSingleton<WS_TimerBasedEvents.TWeatherChanger>();
+        services.AddSingleton<WS_TimerBasedEvents.TCharacterSaver>();
+        services.AddSingleton<WS_TimerBasedEvents.TRegenerator>();
+        services.AddSingleton<WS_TimerBasedEvents.TSpellManager>();
+        services.AddSingleton<WardenMaiev>();
+
+        services.AddSingleton<ICharacterResurrectionService, CharacterResurrectionService>();
+        services.AddSingleton<ICellUpdater, CellUpdater>();
+        services.AddSingleton<IMapTileLoader, MapTileLoader>();
+
+        services.AddSingleton<Func<WS_Spawns>>(sp => () => sp.GetRequiredService<WS_Spawns>());
+
+        return services;
+    }
+
+    public static IServiceCollection AddFactories(this IServiceCollection services)
+    {
+        services.AddSingleton<ClientClassFactory>();
+        services.AddSingleton<UpdateClassFactory>();
+
+        services.AddSingleton<DynamicObjectFactory>();
+
+        services.AddSingleton<GameObjectFactory>();
+        services.AddSingleton<GameObjectInfoFactory>();
+
+        services.AddSingleton<CharacterObjectFactory>();
+        services.AddSingleton<CreatureObjectFactory>();
+        services.AddSingleton<CreatureInfoFactory>();
+        services.AddSingleton<PetObjectFactory>();
+        services.AddSingleton<CorpseObjectFactory>();
+        services.AddSingleton<TotemObjectFactory>();
+
+        services.AddSingleton<ItemObjectFactory>();
+        services.AddSingleton<ItemInfoFactory>();
+
+        services.AddSingleton<BaseActiveSpellFactory>();
+        services.AddSingleton<SpellTargetsFactory>();
+        services.AddSingleton<SpellInfoFactory>();
+        services.AddSingleton<CastSpellParametersFactory>();
+        services.AddSingleton<SpellEffectFactory>();
+
+        services.AddSingleton<MapFactory>();
+        services.AddSingleton<MapTileFactory>();
+
+        services.AddSingleton<WeatherZoneFactory>();
+
+        services.AddSingleton<DefaultTalkFactory>();
+        services.AddSingleton<NpcTextFactory>();
+        services.AddSingleton<GuardTalkFactory>();
+
+        services.AddSingleton<TransportObjectFactory>();
+
+        services.AddSingleton<TradeInfoFactory>();
+
+        services.AddSingleton<GroupFactory>();
+
+        services.AddSingleton<LootObjectFactory>();
+        services.AddSingleton<LootItemFactory>();
+        services.AddSingleton<LootTemplateFactory>();
+        services.AddSingleton<LootGroupFactory>();
+        services.AddSingleton<LootStoreFactory>();
+        services.AddSingleton<GroupLootInfoFactory>();
+
+        services.AddSingleton<BaseQuestFactory>();
+        services.AddSingleton<QuestsFactory>();
+        services.AddSingleton<IQuestInfoFactory, QuestInfoFactory>();
+        services.AddSingleton<CritterAiFactory>();
+        services.AddSingleton<DefaultAiFactory>();
+        services.AddSingleton<GuardAiFactory>();
+        services.AddSingleton<GuardWaypointAiFactory>();
+        services.AddSingleton<PetAiFactory>();
+        services.AddSingleton<StandStillAiFactory>();
+        services.AddSingleton<WaypointAiFactory>();
+
+        services.AddSingleton<AttackTimerFactory>();
+
+        services.AddSingleton<WardenScanFactory>();
+
+        services.AddSingleton<Func<LootObjectFactory>>(sp => () => sp.GetRequiredService<LootObjectFactory>());
+        services.AddSingleton<Func<ItemObjectFactory>>(sp => () => sp.GetRequiredService<ItemObjectFactory>());
 
         return services;
     }

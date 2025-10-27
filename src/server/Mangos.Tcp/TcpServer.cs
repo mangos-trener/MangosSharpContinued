@@ -16,7 +16,6 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Autofac;
 using Mangos.Logging;
 using System.Net;
 using System.Net.Sockets;
@@ -25,13 +24,13 @@ namespace Mangos.Tcp;
 
 public sealed class TcpServer
 {
-    private readonly IMangosLogger logger;
-    private readonly ILifetimeScope lifetimeScope;
+    private readonly IMangosLogger _logger;
+    private readonly ITcpConnection _connection;
 
-    public TcpServer(IMangosLogger logger, ILifetimeScope lifetimeScope)
+    public TcpServer(IMangosLogger logger, ITcpConnection connection)
     {
-        this.logger = logger;
-        this.lifetimeScope = lifetimeScope;
+        _logger = logger;
+        _connection = connection;
     }
 
     public async Task RunAsync(string endpoint, CancellationToken cancellationToken = default)
@@ -40,7 +39,7 @@ public sealed class TcpServer
         socket.Bind(IPEndPoint.Parse(endpoint));
         socket.Listen(10);
 
-        logger.Information($"Tcp server was started on {endpoint}");
+        _logger.Information($"Tcp server was started on {endpoint}");
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -52,30 +51,28 @@ public sealed class TcpServer
     {
         if (socket.RemoteEndPoint is not IPEndPoint endpoint)
         {
-            logger.Error("Unable to get remote endpoint");
+            _logger.Error("Unable to get remote endpoint");
             return;
         }
 
-        logger.Information($"Tcp client was conntected {endpoint}");
+        _logger.Information($"Tcp client was conntected {endpoint}");
         try
         {
-            using var scope = lifetimeScope.BeginLifetimeScope();
-            var tcpConnection = scope.Resolve<ITcpConnection>();
-            await tcpConnection.ExecuteAsync(socket, cancellationToken);
+            await _connection.ExecuteAsync(socket, cancellationToken);
         }
         catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionAborted)
         {
-            logger.Information("Connection aborted");
+            _logger.Information("Connection aborted");
         }
         catch (Exception exception)
         {
-            logger.Error(exception, "Unhandled exception");
+            _logger.Error(exception, "Unhandled exception");
         }
         finally
         {
             socket.Dispose();
         }
 
-        logger.Information($"Tcp client was disconected");
+        _logger.Information($"Tcp client was disconected");
     }
 }

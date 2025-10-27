@@ -17,8 +17,12 @@
 //
 
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
-using Microsoft.VisualBasic.CompilerServices;
+using Microsoft.Extensions.Logging;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 // Basically, this AI is kitable and if the AI hits Gluth, it heals her for 5% of her HP (50,000 in this case.). Since we can't really do it that way, it has a set waypoint.
 namespace Mangos.World.Scripts.Creatures;
@@ -33,7 +37,8 @@ public class CreatureAI_Zombie_Chow : WS_Creatures_AI.BossAI
     public int NextWaypoint;
     public int CurrentWaypoint;
 
-    public CreatureAI_Zombie_Chow(ref WS_Creatures.CreatureObject Creature) : base(ref Creature)
+    public CreatureAI_Zombie_Chow(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature)
     {
         AllowedMove = false;
         Creature.Flying = false;
@@ -74,7 +79,7 @@ public class CreatureAI_Zombie_Chow : WS_Creatures_AI.BossAI
             Orientation = 1.33d
         };
         aiCreature.MoveTo((float)Waypoint1.X, (float)Waypoint1.Y, (float)Waypoint1.Z, (float)Waypoint1.Orientation);
-        if (Conversions.ToBoolean(aiCreature.MoveTo((float)Waypoint1.X, (float)Waypoint1.Y, (float)Waypoint1.Z, (float)Waypoint1.Orientation, true)))
+        if (bool.Parse(aiCreature.MoveTo((float)Waypoint1.X, (float)Waypoint1.Y, (float)Waypoint1.Z, (float)Waypoint1.Orientation, true).ToString()))
         {
             WS_Base.BaseUnit argAttacker = null;
             aiCreature.Heal(50000, Attacker: argAttacker);

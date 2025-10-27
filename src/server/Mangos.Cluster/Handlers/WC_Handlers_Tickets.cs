@@ -16,10 +16,12 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Globals;
 using Mangos.Cluster.Network;
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
 using System.Data;
@@ -28,11 +30,13 @@ namespace Mangos.Cluster.Handlers;
 
 public class WcHandlersTickets
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly LegacyWorldCluster cluster;
+    private readonly WsDbcDatabase database;
 
-    public WcHandlersTickets(ClusterServiceLocator clusterServiceLocator)
+    public WcHandlersTickets(LegacyWorldCluster cluster, WsDbcDatabase database)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.cluster = cluster;
+        this.database = database;
     }
 
     public void On_CMSG_BUG(PacketClass packet, ClientClass client)
@@ -45,16 +49,16 @@ public class WcHandlersTickets
         packet.GetInt16();
         SuggestionType suggestion = (SuggestionType)packet.GetInt32();
         var cLength = packet.GetInt32();
-        var cString = _clusterServiceLocator.Functions.EscapeString(packet.GetString());
+        var cString = GlobalFunctions.EscapeString(packet.GetString());
         if (packet.Data.Length - 1 < 14 + cString.Length + 5)
         {
             return;
         }
 
         var tLength = packet.GetInt32();
-        var tString = _clusterServiceLocator.Functions.EscapeString(packet.GetString());
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BUG [2]", client.IP, client.Port, suggestion);
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "Bug report [{0}:{1} Lengths:{2}, {3}] " + cString + Constants.vbCrLf + tString, cLength.ToString(), tLength.ToString());
+        var tString = GlobalFunctions.EscapeString(packet.GetString());
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BUG [2]", client.IP, client.Port, suggestion);
+        cluster.Log.WriteLine(LogType.INFORMATION, "Bug report [{0}:{1} Lengths:{2}, {3}] " + cString + Constants.vbCrLf + tString, cLength.ToString(), tLength.ToString());
     }
 
     // ERR_TICKET_ALREADY_EXISTS
@@ -71,10 +75,10 @@ public class WcHandlersTickets
 
     public void On_CMSG_GMTICKET_GETTICKET(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_GETTICKET", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_GETTICKET", client.IP, client.Port);
         PacketClass smsgGmticketGetticket = new(Opcodes.SMSG_GMTICKET_GETTICKET);
         DataTable mySqlResult = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT * FROM characters_tickets WHERE char_guid = {0};", client.Character.Guid), ref mySqlResult);
+        database.GetCharacterDatabase().Query(string.Format("SELECT * FROM characters_tickets WHERE char_guid = {0};", client.Character.Guid), ref mySqlResult);
         if (mySqlResult.Rows.Count > 0)
         {
             smsgGmticketGetticket.AddInt32((int)GmTicketGetResult.GMTICKET_AVAILABLE);
@@ -88,7 +92,7 @@ public class WcHandlersTickets
         client.Send(smsgGmticketGetticket);
         smsgGmticketGetticket.Dispose();
         PacketClass smsgQueryTimeResponse = new(Opcodes.SMSG_QUERY_TIME_RESPONSE);
-        smsgQueryTimeResponse.AddInt32(_clusterServiceLocator.NativeMethods.timeGetTime("")); // GetTimestamp(Now))
+        smsgQueryTimeResponse.AddInt32(LegacyNativeMethods.TimeGetTime("")); // GetTimestamp(Now))
         client.Send(smsgQueryTimeResponse);
         smsgQueryTimeResponse.Dispose();
     }
@@ -106,19 +110,19 @@ public class WcHandlersTickets
         var ticketX = packet.GetFloat();
         var ticketY = packet.GetFloat();
         var ticketZ = packet.GetFloat();
-        var ticketText = _clusterServiceLocator.Functions.EscapeString(packet.GetString());
+        var ticketText = GlobalFunctions.EscapeString(packet.GetString());
         DataTable mySqlResult = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query(string.Format("SELECT * FROM characters_tickets WHERE char_guid = {0};", client.Character.Guid), ref mySqlResult);
+        database.GetCharacterDatabase().Query(string.Format("SELECT * FROM characters_tickets WHERE char_guid = {0};", client.Character.Guid), ref mySqlResult);
         PacketClass smsgGmticketCreate = new(Opcodes.SMSG_GMTICKET_CREATE);
         if (mySqlResult.Rows.Count > 0)
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_CREATE", client.IP, client.Port);
+            cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_CREATE", client.IP, client.Port);
             smsgGmticketCreate.AddInt32((int)GmTicketCreateResult.GMTICKET_ALREADY_HAVE);
         }
         else
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_CREATE [{2}]", client.IP, client.Port, ticketText);
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("INSERT INTO characters_tickets (char_guid, ticket_text, ticket_x, ticket_y, ticket_z, ticket_map) VALUES ({0} , \"{1}\", {2}, {3}, {4}, {5});", client.Character.Guid, ticketText, Strings.Trim(Conversion.Str(ticketX)), Strings.Trim(Conversion.Str(ticketY)), Strings.Trim(Conversion.Str(ticketZ)), ticketMap));
+            cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_CREATE [{2}]", client.IP, client.Port, ticketText);
+            database.GetCharacterDatabase().Update(string.Format("INSERT INTO characters_tickets (char_guid, ticket_text, ticket_x, ticket_y, ticket_z, ticket_map) VALUES ({0} , \"{1}\", {2}, {3}, {4}, {5});", client.Character.Guid, ticketText, Strings.Trim(Conversion.Str(ticketX)), Strings.Trim(Conversion.Str(ticketY)), Strings.Trim(Conversion.Str(ticketZ)), ticketMap));
             smsgGmticketCreate.AddInt32((int)GmTicketCreateResult.GMTICKET_CREATE_OK);
         }
 
@@ -135,7 +139,7 @@ public class WcHandlersTickets
 
     public void On_CMSG_GMTICKET_SYSTEMSTATUS(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_SYSTEMSTATUS", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_SYSTEMSTATUS", client.IP, client.Port);
         PacketClass smsgGmticketSystemstatus = new(Opcodes.SMSG_GMTICKET_SYSTEMSTATUS);
         smsgGmticketSystemstatus.AddInt32((int)GmTicketSystemStatus.GMTICKET_SYSTEMSTATUS_SURVEY);
         client.Send(smsgGmticketSystemstatus);
@@ -149,8 +153,8 @@ public class WcHandlersTickets
 
     public void On_CMSG_GMTICKET_DELETETICKET(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_DELETETICKET", client.IP, client.Port);
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("DELETE FROM characters_tickets WHERE char_guid = {0};", client.Character.Guid));
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_DELETETICKET", client.IP, client.Port);
+        database.GetCharacterDatabase().Update(string.Format("DELETE FROM characters_tickets WHERE char_guid = {0};", client.Character.Guid));
         PacketClass smsgGmticketDeleteticket = new(Opcodes.SMSG_GMTICKET_DELETETICKET);
         smsgGmticketDeleteticket.AddInt32((int)GmTicketDeleteResult.GMTICKET_DELETE_SUCCESS);
         client.Send(smsgGmticketDeleteticket);
@@ -165,16 +169,16 @@ public class WcHandlersTickets
         }
 
         packet.GetInt16();
-        var ticketText = _clusterServiceLocator.Functions.EscapeString(packet.GetString());
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_UPDATETEXT [{2}]", client.IP, client.Port, ticketText);
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("UPDATE characters_tickets SET char_guid={0}, ticket_text=\"{1}\";", client.Character.Guid, ticketText));
+        var ticketText = GlobalFunctions.EscapeString(packet.GetString());
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_GMTICKET_UPDATETEXT [{2}]", client.IP, client.Port, ticketText);
+        database.GetCharacterDatabase().Update(string.Format("UPDATE characters_tickets SET char_guid={0}, ticket_text=\"{1}\";", client.Character.Guid, ticketText));
     }
 
     public void On_CMSG_WHOIS(PacketClass packet, ClientClass client)
     {
         packet.GetInt16();
         var name = packet.GetString();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_WHOIS [{2}]", client.IP, client.Port, name);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_WHOIS [{2}]", client.IP, client.Port, name);
         PacketClass response = new(Opcodes.SMSG_WHOIS);
         response.AddString("This feature is not available yet.");
         client.Send(response);

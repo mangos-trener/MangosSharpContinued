@@ -16,13 +16,22 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
+using Mangos.Configuration;
 using Mangos.World.AI;
+using Mangos.World.DataStores;
 using Mangos.World.Globals;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Network;
+using Mangos.World.Objects.Factories;
 using Mangos.World.Player;
+using Mangos.World.Services;
+using Mangos.World.Spells;
+using Microsoft.Extensions.Logging;
 using System.Collections;
 using System.Data;
 
@@ -48,8 +57,23 @@ public class WS_Pets
 
         public int XP;
 
-        public PetObject(ulong GUID_, int CreatureID)
-            : base(GUID_, CreatureID)
+        public PetObject(
+            ILogger<PetObject> logger,
+            WorldState worldState,
+            MangosConfiguration configuration,
+            WS_DBCDatabase database,
+            CharacterDatabase characterDatabase,
+            WS_Maps maps,
+            WS_Creatures creatures,
+            WS_Combat combat,
+            WS_Loot loot,
+            WS_Spells spells,
+            WS_Network network,
+            IMapTileLoader tileLoader,
+            CreatureInfoFactory creatureInfoFactory,
+            ulong GUID_,
+            int CreatureID)
+            : base(logger, null, worldState, configuration, database, maps, creatures, combat, loot, network, tileLoader, lootObjectFactory: null, creatureInfoFactory: creatureInfoFactory, baseActiveSpellFactory: null, spellTargetsFactory: null, castSpellParametersFactory: null, updateClassFactory: null, critterAiFactory: null, defaultAiFactory: null, guardAiFactory: null, guardWaypointAiFactory: null, petAiFactory: null, standStillAiFactory: null, waypointAiFactory: null, GUID_: GUID_, ID_: CreatureID)
         {
             PetName = "";
             Renamed = false;
@@ -63,22 +87,24 @@ public class WS_Pets
         public void Spawn()
         {
             AddToWorld();
-            if (Owner is WS_PlayerData.CharacterObject @object)
+
+            if (Owner is CharacterObject @object)
             {
                 @object.GroupUpdateFlag |= 0x7FC00u;
             }
-            var wS_Pets = WorldServiceLocator.WSPets;
+
             ref var owner = ref Owner;
-            WS_PlayerData.CharacterObject Caster = (WS_PlayerData.CharacterObject)owner;
+            CharacterObject Caster = (CharacterObject)owner;
             WS_Base.BaseUnit Pet = this;
-            wS_Pets.SendPetInitialize(ref Caster, ref Pet);
+
+            SendPetInitialize(ref Caster, ref Pet);
             owner = Caster;
         }
 
         public void Hide()
         {
             RemoveFromWorld();
-            if (Owner is WS_PlayerData.CharacterObject @object)
+            if (Owner is CharacterObject @object)
             {
                 @object.GroupUpdateFlag |= 0x7FC00u;
                 Packets.PacketClass packet = new(Opcodes.SMSG_PET_SPELLS);
@@ -91,8 +117,8 @@ public class WS_Pets
 
     public class PetAI : WS_Creatures_AI.DefaultAI
     {
-        public PetAI(ref WS_Creatures.CreatureObject Creature)
-            : base(ref Creature)
+        public PetAI(ILogger<PetAI> logger, WorldState worldState, ref WS_Creatures.CreatureObject Creature, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat)
+            : base(logger, worldState, ref Creature, maps, loot, creatures, combat)
         {
             AllowedMove = false;
         }
@@ -101,11 +127,19 @@ public class WS_Pets
     public int[] LevelUpLoyalty;
 
     public int[] LevelStartLoyalty;
+    private readonly ILogger<WS_Pets> logger;
+    private readonly WorldState worldState;
+    private readonly CharacterDatabase characterDatabase;
+    private readonly PetObjectFactory petObjectFactory;
 
-    public WS_Pets()
+    public WS_Pets(ILogger<WS_Pets> logger, WorldState worldState, CharacterDatabase characterDatabase, PetObjectFactory petObjectFactory)
     {
         LevelUpLoyalty = new int[7];
         LevelStartLoyalty = new int[7];
+        this.logger = logger;
+        this.worldState = worldState;
+        this.characterDatabase = characterDatabase;
+        this.petObjectFactory = petObjectFactory;
     }
 
     public void InitializeLevelUpLoyalty()
@@ -135,14 +169,14 @@ public class WS_Pets
         packet.GetInt16();
         var PetNumber = packet.GetInt32();
         var PetGUID = packet.GetUInt64();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_NAME_QUERY [Number={0} GUID={1:X}", PetNumber, PetGUID);
+        logger.LogDebug("CMSG_PET_NAME_QUERY [Number={0} GUID={1:X}", PetNumber, PetGUID);
         SendPetNameQuery(ref client, PetGUID, PetNumber);
     }
 
     public void On_CMSG_REQUEST_PET_INFO(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_REQUEST_PET_INFO");
-        WorldServiceLocator.Packets.DumpPacket(packet.Data, client, 6);
+        logger.LogDebug("CMSG_REQUEST_PET_INFO");
+        Packets.DumpPacket(logger, packet.Data, client, 6);
     }
 
     public void On_CMSG_PET_ACTION(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
@@ -152,20 +186,20 @@ public class WS_Pets
         var SpellID = packet.GetUInt16();
         var SpellFlag = packet.GetUInt16();
         var TargetGUID = packet.GetUInt64();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_ACTION [GUID={0:X} Spell={1} Flag={2:X} Target={3:X}]", PetGUID, SpellID, SpellFlag, TargetGUID);
+        logger.LogDebug("CMSG_PET_ACTION [GUID={0:X} Spell={1} Flag={2:X} Target={3:X}]", PetGUID, SpellID, SpellFlag, TargetGUID);
     }
 
     public void On_CMSG_PET_CANCEL_AURA(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_CANCEL_AURA");
-        WorldServiceLocator.Packets.DumpPacket(packet.Data, client, 6);
+        logger.LogDebug("CMSG_PET_CANCEL_AURA");
+        Packets.DumpPacket(logger, packet.Data, client, 6);
     }
 
     public void On_CMSG_PET_ABANDON(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
         packet.GetInt16();
         var PetGUID = packet.GetUInt64();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_ABANDON [GUID={0:X}]", PetGUID);
+        logger.LogDebug("CMSG_PET_ABANDON [GUID={0:X}]", PetGUID);
     }
 
     public void On_CMSG_PET_RENAME(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
@@ -173,7 +207,7 @@ public class WS_Pets
         packet.GetInt16();
         var PetGUID = packet.GetUInt64();
         var PetName = packet.GetString();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_RENAME [GUID={0:X} Name={1}]", PetGUID, PetName);
+        logger.LogDebug("CMSG_PET_RENAME [GUID={0:X} Name={1}]", PetGUID, PetName);
     }
 
     public void On_CMSG_PET_SET_ACTION(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
@@ -183,73 +217,67 @@ public class WS_Pets
         var Position = packet.GetInt32();
         var SpellID = packet.GetUInt16();
         var ActionState = packet.GetInt16();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_SET_ACTION [GUID={0:X} Pos={1} Spell={2} Action={3}]", PetGUID, Position, SpellID, ActionState);
+        logger.LogDebug("CMSG_PET_SET_ACTION [GUID={0:X} Pos={1} Spell={2} Action={3}]", PetGUID, Position, SpellID, ActionState);
     }
 
     public void On_CMSG_PET_SPELL_AUTOCAST(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_SPELL_AUTOCAST");
-        WorldServiceLocator.Packets.DumpPacket(packet.Data, client, 6);
+        logger.LogDebug("CMSG_PET_SPELL_AUTOCAST");
+        Packets.DumpPacket(logger, packet.Data, client, 6);
     }
 
     public void On_CMSG_PET_STOP_ATTACK(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_STOP_ATTACK");
-        WorldServiceLocator.Packets.DumpPacket(packet.Data, client, 6);
+        logger.LogDebug("CMSG_PET_STOP_ATTACK");
+        Packets.DumpPacket(logger, packet.Data, client, 6);
     }
 
     public void On_CMSG_PET_UNLEARN(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "CMSG_PET_UNLEARN");
-        WorldServiceLocator.Packets.DumpPacket(packet.Data, client, 6);
+        logger.LogDebug("CMSG_PET_UNLEARN");
+        Packets.DumpPacket(logger, packet.Data, client, 6);
     }
 
     public void SendPetNameQuery(ref WS_Network.ClientClass client, ulong PetGUID, int PetNumber)
     {
-        if (WorldServiceLocator.WorldServer.WORLD_CREATUREs.ContainsKey(PetGUID) && WorldServiceLocator.WorldServer.WORLD_CREATUREs[PetGUID] is PetObject @object)
+        if (worldState.WorldCreatures.ContainsKey(PetGUID) && worldState.WorldCreatures[PetGUID] is PetObject @object)
         {
             Packets.PacketClass response = new(Opcodes.SMSG_PET_NAME_QUERY_RESPONSE);
             response.AddInt32(PetNumber);
             response.AddString(@object.PetName);
-            response.AddInt32(WorldServiceLocator.NativeMethods.timeGetTime(""));
+            response.AddInt32(LegacyNativeMethods.TimeGetTime(""));
             client.Send(ref response);
             response.Dispose();
         }
     }
 
-    public void LoadPet(ref WS_PlayerData.CharacterObject objCharacter)
+    public void LoadPet(ref CharacterObject objCharacter)
     {
         if (objCharacter.Pet != null)
         {
             return;
         }
+
         DataTable PetQuery = new();
-        WorldServiceLocator.WorldServer.CharacterDatabase.Query($"SELECT * FROM character_pet WHERE owner = '{objCharacter.GUID}';", ref PetQuery);
+        characterDatabase.Query($"SELECT * FROM character_pet WHERE owner = '{objCharacter.GUID}';", ref PetQuery);
+
         if (PetQuery.Rows.Count != 0)
         {
             var row = PetQuery.Rows[0];
-            objCharacter.Pet = new PetObject(checked(row.As<ulong>("id") + WorldServiceLocator.GlobalConstants.GUID_PET), row.As<int>("entry"))
-            {
-                Owner = objCharacter,
-                SummonedBy = objCharacter.GUID,
-                CreatedBy = objCharacter.GUID,
-                Level = row.As<byte>("level"),
-                XP = row.As<int>("exp"),
-                PetName = row.As<string>("name")
-            };
+            objCharacter.Pet = petObjectFactory.Create(checked(row.As<ulong>("id") + MangosGlobalConstants.GUID_PET), row.As<int>("entry"));
             objCharacter.Pet.Renamed = row.As<byte>("renamed") != 0;
             objCharacter.Pet.Faction = objCharacter.Faction;
             objCharacter.Pet.positionX = objCharacter.positionX;
             objCharacter.Pet.positionY = objCharacter.positionY;
             objCharacter.Pet.positionZ = objCharacter.positionZ;
             objCharacter.Pet.MapID = objCharacter.MapID;
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Loaded pet [{0}] for character [{1}].", objCharacter.Pet.GUID, objCharacter.GUID);
+            logger.LogDebug("Loaded pet [{0}] for character [{1}].", objCharacter.Pet.GUID, objCharacter.GUID);
         }
     }
 
-    public void SendPetInitialize(ref WS_PlayerData.CharacterObject Caster, ref WS_Base.BaseUnit Pet)
+    public static void SendPetInitialize(ref CharacterObject Caster, ref WS_Base.BaseUnit Pet)
     {
-        if (Pet is WS_Creatures.CreatureObject or WS_PlayerData.CharacterObject)
+        if (Pet is WS_Creatures.CreatureObject or CharacterObject)
         {
         }
         ushort Command = 7;

@@ -16,12 +16,10 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.World.Network;
-using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 
 namespace Mangos.World.AntiCheat;
 
@@ -30,7 +28,7 @@ public sealed class WS_Anticheat
 {
     private static readonly List<SpeedHackViolation> SpeedHacks = new();
 
-    public static void MovementEvent(ref WS_Network.ClientClass client, float RunSpeed, float posX, float positionX, float posY, float positionY, float posZ, float positionZ, int sTime, int cTime)
+    public static void MovementEvent(ILogger logger, ref WS_Network.ClientClass client, float RunSpeed, float posX, float positionX, float posY, float positionY, float posZ, float positionZ, int sTime, int cTime)
     {
         var character = client.Character;
         SpeedHackViolation sData;
@@ -49,10 +47,10 @@ public sealed class WS_Anticheat
             if (sData.LastViolation != 0)
             {
                 sData.Violations += (int)sData.LastViolation;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "[AntiCheat] Player {0} triggered a speedhack violation. ({1}) {2}", client.Character.Name, sData.Violations, sData.LastMessage);
+                logger.LogInformation("[AntiCheat] Player {0} triggered a speedhack violation. ({1}) {2}", client.Character.Name, sData.Violations, sData.LastMessage);
                 if (sData.Violations >= 10)
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.USER, "[AntiCheat] Player {0} exceeded violation value. Taking action.", client.Character.Name);
+                    logger.LogInformation("[AntiCheat] Player {0} exceeded violation value. Taking action.", client.Character.Name);
                     client.Character.Logout();
                     SpeedHacks.Remove(sData);
                 }

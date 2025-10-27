@@ -30,11 +30,11 @@ namespace Mangos.Cluster.Globals;
 
 public class Packets
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly LegacyWorldCluster cluster;
 
-    public Packets(ClusterServiceLocator clusterServiceLocator)
+    public Packets(LegacyWorldCluster cluster)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.cluster = cluster;;
     }
 
     public void DumpPacket(byte[] data, [Optional, DefaultParameterValue(null)] ClientClass client)
@@ -70,12 +70,12 @@ public class Packets
                 buffer += " |" + Constants.vbCrLf;
             }
 
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, buffer, default);
+            cluster.Log.WriteLine(LogType.DEBUG, buffer, default);
         }
         // #End If
         catch (Exception e)
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.FAILED, "Error dumping packet: {0}{1}", Constants.vbCrLf, e.ToString());
+            cluster.Log.WriteLine(LogType.FAILED, "Error dumping packet: {0}{1}", Constants.vbCrLf, e.ToString());
         }
     }
 
@@ -139,7 +139,7 @@ public class Packets
         }
         catch (Exception e)
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.WARNING, $"Log Packet has thrown an Exception!", e);
+            cluster.Log.WriteLine(LogType.WARNING, $"Log Packet has thrown an Exception!", e);
         }
     }
 

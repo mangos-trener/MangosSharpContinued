@@ -17,7 +17,12 @@
 //
 
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 namespace Mangos.World.Scripts.Creatures;
 
@@ -33,7 +38,8 @@ public class CreatureAI_Taragaman_the_Hungerer : WS_Creatures_AI.BossAI
     public int NextUPPER;
     public int CurrentWaypoint;
 
-    public CreatureAI_Taragaman_the_Hungerer(ref WS_Creatures.CreatureObject Creature) : base(ref Creature)
+    public CreatureAI_Taragaman_the_Hungerer(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature)
     {
         AllowedMove = false;
         Creature.Flying = false;

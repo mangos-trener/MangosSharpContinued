@@ -16,9 +16,12 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
 using Mangos.World.Player;
-using System.Collections.Generic;
+using Microsoft.Extensions.Logging;
 using System.Threading;
 
 namespace Mangos.World.AI;
@@ -27,8 +30,8 @@ public partial class WS_Creatures_AI
 {
     public class BossAI : DefaultAI
     {
-        public BossAI(ref WS_Creatures.CreatureObject Creature)
-            : base(ref Creature)
+        public BossAI(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+            : base(logger, worldState, ref Creature, maps, loot, creatures, combat)
         {
         }
 
@@ -37,19 +40,19 @@ public partial class WS_Creatures_AI
             base.OnEnterCombat();
             foreach (var Unit in aiHateTable)
             {
-                if (Unit.Key is not WS_PlayerData.CharacterObject)
+                if (Unit.Key is not CharacterObject)
                 {
                     continue;
                 }
-                WS_PlayerData.CharacterObject characterObject = (WS_PlayerData.CharacterObject)Unit.Key;
+                CharacterObject characterObject = (CharacterObject)Unit.Key;
                 if (characterObject.IsInGroup)
                 {
                     var array = characterObject.Group.LocalMembers.ToArray();
                     foreach (var member in array)
                     {
-                        if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(member) && WorldServiceLocator.WorldServer.CHARACTERs[member].MapID == characterObject.MapID && WorldServiceLocator.WorldServer.CHARACTERs[member].instance == characterObject.instance)
+                        if (worldState.Characters.ContainsKey(member) && worldState.Characters[member].MapID == characterObject.MapID && worldState.Characters[member].instance == characterObject.instance)
                         {
-                            aiHateTable.Add(WorldServiceLocator.WorldServer.CHARACTERs[member], 0);
+                            aiHateTable.Add(worldState.Characters[member], 0);
                         }
                     }
                     break;

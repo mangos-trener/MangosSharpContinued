@@ -46,11 +46,11 @@ public class SQL : IDisposable
     // End Property
     // #End Region
 
-    private string v_SQLHost = "localhost";
-    private string v_SQLPort = "3306";
-    private string v_SQLUser = "";
-    private string v_SQLPass = "";
-    private string v_SQLDBName = "";
+    protected string v_SQLHost = "localhost";
+    protected string v_SQLPort = "3306";
+    protected string v_SQLUser = "";
+    protected string v_SQLPass = "";
+    protected string v_SQLDBName = "";
 
     public enum DB_Type
     {
@@ -300,6 +300,11 @@ public class SQL : IDisposable
 
     public int Query(string sqlquery, ref DataTable Result)
     {
+        if (MySQLConn == null)
+        {
+            Connect();
+        }
+
         switch (v_SQLType)
         {
             case DB_Type.MySQL:

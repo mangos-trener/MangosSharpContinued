@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Handlers;
 using Mangos.Cluster.Network;
 using Mangos.Common.Enums.Chat;
@@ -33,21 +34,14 @@ using System.Text.RegularExpressions;
 
 namespace Mangos.Cluster.Globals;
 
-public class Functions
+public static class GlobalFunctions
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
-
-    public Functions(ClusterServiceLocator clusterServiceLocator)
-    {
-        _clusterServiceLocator = clusterServiceLocator;
-    }
-
-    public int ToInteger(bool value)
+    public static int ToInteger(bool value)
     {
         return value ? 1 : 0;
     }
 
-    public string ToHex(byte[] bBytes, int start = 0)
+    public static string ToHex(byte[] bBytes, int start = 0)
     {
         if (bBytes.Length == 0)
         {
@@ -70,7 +64,7 @@ public class Functions
         return tmpStr;
     }
 
-    public char[] ByteToCharArray(byte[] bBytes)
+    public static char[] ByteToCharArray(byte[] bBytes)
     {
         if (bBytes.Length == 0)
         {
@@ -86,7 +80,7 @@ public class Functions
         return bChar;
     }
 
-    public int[] ByteToIntArray(byte[] bBytes)
+    public static int[] ByteToIntArray(byte[] bBytes)
     {
         if (bBytes.Length == 0)
         {
@@ -102,7 +96,7 @@ public class Functions
         return bInt;
     }
 
-    public byte[] IntToByteArray(int[] bInt)
+    public static byte[] IntToByteArray(int[] bInt)
     {
         if (bInt.Length == 0)
         {
@@ -119,7 +113,7 @@ public class Functions
         return bBytes;
     }
 
-    public byte[] Concat(byte[] a, byte[] b)
+    public static byte[] Concat(byte[] a, byte[] b)
     {
         var buffer1 = new byte[(a.Length + b.Length)];
         int num1;
@@ -139,19 +133,19 @@ public class Functions
         return buffer1;
     }
 
-    public bool HaveFlag(uint value, byte flagPos)
+    public static bool HaveFlag(uint value, byte flagPos)
     {
         value >>= flagPos;
         value = (uint)(value % 2L);
         return value == 1L;
     }
 
-    public bool HaveFlags(int value, int flags)
+    public static bool HaveFlags(int value, int flags)
     {
         return (value & flags) == flags;
     }
 
-    public void SetFlag(ref uint value, byte flagPos, bool flagValue)
+    public static void SetFlag(ref uint value, byte flagPos, bool flagValue)
     {
         if (flagValue)
         {
@@ -163,7 +157,7 @@ public class Functions
         }
     }
 
-    public DateTime GetNextDay(DayOfWeek iDay, int hour = 0)
+    public static DateTime GetNextDay(DayOfWeek iDay, int hour = 0)
     {
         var iDiff = (int)iDay - (int)DateAndTime.Today.DayOfWeek;
         if (iDiff <= 0)
@@ -176,14 +170,14 @@ public class Functions
         return nextFriday;
     }
 
-    public DateTime GetNextDate(int days, int hours = 0)
+    public static DateTime GetNextDate(int days, int hours = 0)
     {
         var nextDate = DateAndTime.Today.AddDays(days);
         nextDate = nextDate.AddHours(hours);
         return nextDate;
     }
 
-    public uint GetTimestamp(DateTime fromDateTime)
+    public static uint GetTimestamp(DateTime fromDateTime)
     {
         DateTime startDate = DateTime.Parse("1970-01-01");
         TimeSpan timeSpan;
@@ -191,7 +185,7 @@ public class Functions
         return (uint)Math.Abs(timeSpan.TotalSeconds);
     }
 
-    public DateTime GetDateFromTimestamp(uint unixTimestamp)
+    public static DateTime GetDateFromTimestamp(uint unixTimestamp)
     {
         TimeSpan timeSpan;
         DateTime startDate = DateTime.Parse("1970-01-01");
@@ -204,7 +198,7 @@ public class Functions
         return startDate.Add(timeSpan);
     }
 
-    public string GetTimeLeftString(uint seconds)
+    public static string GetTimeLeftString(uint seconds)
     {
         if (seconds < 60L)
         {
@@ -221,36 +215,36 @@ public class Functions
             : (seconds / 86400L) + "d " + (seconds / 3600L % 24L) + "h " + (seconds / 60L % 60L) + "m " + (seconds % 60L) + "s";
     }
 
-    public string EscapeString(string s)
+    public static string EscapeString(string s)
     {
         return s.Replace("\"", "").Replace("'", "");
     }
 
-    public string CapitalizeName(string name)
+    public static string CapitalizeName(string name)
     {
         return name.Length > 1 ? Strings.UCase(Strings.Left(name, 1)) + Strings.LCase(Strings.Right(name, name.Length - 1)) : Strings.UCase(name);
     }
 
-    private readonly Regex _regexAz = new("^[a-zA-Z]+$");
+    private static readonly Regex _regexAz = new("^[a-zA-Z]+$");
 
-    public bool ValidateName(string strName)
+    public static bool ValidateName(string strName)
     {
         return strName.Length is not < 2 and not > 16 && _regexAz.IsMatch(strName);
     }
 
-    private readonly Regex _regexGuild = new("^[a-z A-Z]+$");
+    private static readonly Regex _regexGuild = new("^[a-z A-Z]+$");
 
-    public bool ValidateGuildName(string strName)
+    public static bool ValidateGuildName(string strName)
     {
         return strName.Length is not < 2 and not > 16 && _regexGuild.IsMatch(strName);
     }
 
-    public string FixName(string strName)
+    public static string FixName(string strName)
     {
         return strName.Replace("\"", "'").Replace("<", "").Replace(">", "").Replace("*", "").Replace("/", "").Replace(@"\", "").Replace(":", "").Replace("|", "").Replace("?", "");
     }
 
-    public void RAND_bytes(ref byte[] bBytes, int length)
+    public static void RAND_bytes(ref byte[] bBytes, int length)
     {
         if (length == 0)
         {
@@ -269,39 +263,39 @@ public class Functions
         }
     }
 
-    public float MathLerp(float value1, float value2, float amount)
+    public static float MathLerp(float value1, float value2, float amount)
     {
         return value1 + ((value2 - value1) * amount);
     }
 
-    public void Ban_Account(string name, string reason)
+    public static void Ban_Account(LegacyWorldCluster cluster, WsDbcDatabase database, string name, string reason)
     {
         DataTable account = new();
         DataTable bannedAccount = new();
-        _clusterServiceLocator.WorldCluster.GetAccountDatabase().Query(string.Format("SELECT id, username FROM account WHERE username = {0};", name), ref account);
+        database.GetAccountDatabase().Query(string.Format("SELECT id, username FROM account WHERE username = {0};", name), ref account);
         if (account.Rows.Count > 0)
         {
             var accId = account.Rows[0].As<int>("id");
-            _clusterServiceLocator.WorldCluster.GetAccountDatabase().Query(string.Format("SELECT id, active FROM account_banned WHERE id = {0};", accId), ref bannedAccount);
+            database.GetAccountDatabase().Query(string.Format("SELECT id, active FROM account_banned WHERE id = {0};", accId), ref bannedAccount);
             if (bannedAccount.Rows.Count > 0)
             {
-                _clusterServiceLocator.WorldCluster.GetAccountDatabase().Update("UPDATE account_banned SET active = 1 WHERE id = '" + accId + "';");
+                database.GetAccountDatabase().Update("UPDATE account_banned SET active = 1 WHERE id = '" + accId + "';");
             }
             else
             {
                 var tempBanDate = Strings.FormatDateTime(Conversions.ToDate(DateTime.Now.ToFileTimeUtc().ToString()), DateFormat.LongDate) + " " + Strings.FormatDateTime(Conversions.ToDate(DateTime.Now.ToFileTimeUtc().ToString()), DateFormat.LongTime);
-                _clusterServiceLocator.WorldCluster.GetAccountDatabase().Update(string.Format("INSERT INTO `account_banned` VALUES ('{0}', UNIX_TIMESTAMP('{1}'), UNIX_TIMESTAMP('{2}'), '{3}', '{4}', active = 1);", accId, tempBanDate, "0000-00-00 00:00:00", name, reason));
+                database.GetAccountDatabase().Update(string.Format("INSERT INTO `account_banned` VALUES ('{0}', UNIX_TIMESTAMP('{1}'), UNIX_TIMESTAMP('{2}'), '{3}', '{4}', active = 1);", accId, tempBanDate, "0000-00-00 00:00:00", name, reason));
             }
 
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "Account [{0}] banned by server. Reason: [{1}].", name, reason);
+            cluster.Log.WriteLine(LogType.INFORMATION, "Account [{0}] banned by server. Reason: [{1}].", name, reason);
         }
         else
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "Account [{0}] NOT Found in Database.", name);
+            cluster.Log.WriteLine(LogType.INFORMATION, "Account [{0}] NOT Found in Database.", name);
         }
     }
 
-    public string GetClassName(int classe)
+    public static string GetClassName(int classe)
     {
         string getClassNameRet;
         switch ((Classes)classe)
@@ -370,7 +364,7 @@ public class Functions
         return getClassNameRet;
     }
 
-    public string GetRaceName(int race)
+    public static string GetRaceName(int race)
     {
         string getRaceNameRet;
         switch ((Races)race)
@@ -433,7 +427,7 @@ public class Functions
         return getRaceNameRet;
     }
 
-    public int GetRaceModel(Races race, int gender)
+    public static int GetRaceModel(Races race, int gender)
     {
         switch (race)
         {
@@ -484,7 +478,7 @@ public class Functions
         }
     }
 
-    public bool GetCharacterSide(byte race)
+    public static bool GetCharacterSide(byte race)
     {
         switch ((Races)race)
         {
@@ -503,7 +497,7 @@ public class Functions
         }
     }
 
-    public bool IsContinentMap(int map)
+    public static bool IsContinentMap(int map)
     {
         switch (map)
         {
@@ -520,7 +514,7 @@ public class Functions
         }
     }
 
-    public string SetColor(string message, byte red, byte green, byte blue)
+    public static string SetColor(string message, byte red, byte green, byte blue)
     {
         var setColorRet = "|cFF";
         setColorRet = red < 16 ? setColorRet + "0" + Conversion.Hex(red) : setColorRet + Conversion.Hex(red);
@@ -532,19 +526,19 @@ public class Functions
         // SetColor = String.Format("|cff{0:x}{1:x}{2:x}{3}|r", Red, Green, Blue, Message)
     }
 
-    public bool RollChance(float chance)
+    public static bool RollChance(LegacyWorldCluster cluster, float chance)
     {
         var nChance = (int)(chance * 100f);
-        return _clusterServiceLocator.WorldCluster.Rnd.Next(1, 10001) <= nChance;
+        return cluster.Rnd.Next(1, 10001) <= nChance;
     }
 
-    public void SendMessageMotd(ClientClass client, string message)
+    public static void SendMessageMotd(LegacyWorldCluster cluster, ClientClass client, string message)
     {
-        var packet = BuildChatMessage(0, message, ChatMsg.CHAT_MSG_SYSTEM, LANGUAGES.LANG_UNIVERSAL);
+        var packet = BuildChatMessage(cluster, 0, message, ChatMsg.CHAT_MSG_SYSTEM, LANGUAGES.LANG_UNIVERSAL);
         client.Send(packet);
     }
 
-    public void SendMessageNotification(ClientClass client, string message)
+    public static void SendMessageNotification(ClientClass client, string message)
     {
         PacketClass packet = new(Opcodes.SMSG_NOTIFICATION);
         try
@@ -558,9 +552,9 @@ public class Functions
         }
     }
 
-    public void SendMessageSystem(ClientClass objCharacter, string message)
+    public static void SendMessageSystem(LegacyWorldCluster cluster, ClientClass objCharacter, string message)
     {
-        var packet = BuildChatMessage(0, message, ChatMsg.CHAT_MSG_SYSTEM, LANGUAGES.LANG_UNIVERSAL, 0, "");
+        var packet = BuildChatMessage(cluster, 0, message, ChatMsg.CHAT_MSG_SYSTEM, LANGUAGES.LANG_UNIVERSAL, 0, "");
         try
         {
             objCharacter.Send(packet);
@@ -571,21 +565,21 @@ public class Functions
         }
     }
 
-    public void Broadcast(string message)
+    public static void Broadcast(LegacyWorldCluster cluster, string message)
     {
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.AcquireReaderLock(_clusterServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-        foreach (var character in _clusterServiceLocator.WorldCluster.CharacteRs)
+        cluster.CharacteRsLock.AcquireReaderLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
+        foreach (var character in cluster.CharacteRs)
         {
             if (character.Value.Client is not null)
             {
-                SendMessageSystem(character.Value.Client, "System Message: " + SetColor(message, 255, 0, 0));
+                SendMessageSystem(cluster, character.Value.Client, "System Message: " + SetColor(message, 255, 0, 0));
             }
         }
 
-        _clusterServiceLocator.WorldCluster.CharacteRsLock.ReleaseReaderLock();
+        cluster.CharacteRsLock.ReleaseReaderLock();
     }
 
-    public void SendAccountMd5(ClientClass client, WcHandlerCharacter.CharacterObject character)
+    public static void SendAccountMd5(LegacyWorldCluster cluster, ClientClass client, WcHandlerCharacter.CharacterObject character)
     {
         var foundData = false;
 
@@ -636,21 +630,21 @@ public class Functions
             smsgAccountDataTimes.Dispose();
         }
 
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_ACCOUNT_DATA_MD5", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_ACCOUNT_DATA_MD5", client.IP, client.Port);
     }
 
-    public void SendTriggerCinematic(ClientClass client, WcHandlerCharacter.CharacterObject character)
+    public static void SendTriggerCinematic(LegacyWorldCluster cluster, WsDbcDatabase database, ClientClass client, WcHandlerCharacter.CharacterObject character)
     {
         PacketClass packet = new(Opcodes.SMSG_TRIGGER_CINEMATIC);
         try
         {
-            if (_clusterServiceLocator.WsDbcDatabase.CharRaces.ContainsKey((int)character.Race))
+            if (database.CharRaces.ContainsKey((int)character.Race))
             {
-                packet.AddInt32(_clusterServiceLocator.WsDbcDatabase.CharRaces[(int)character.Race].CinematicId);
+                packet.AddInt32(database.CharRaces[(int)character.Race].CinematicId);
             }
             else
             {
-                _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.WARNING, "[{0}:{1}] SMSG_TRIGGER_CINEMATIC [Error: RACE={2} CLASS={3}]", client.IP, client.Port, character.Race, character.Classe);
+                cluster.Log.WriteLine(LogType.WARNING, "[{0}:{1}] SMSG_TRIGGER_CINEMATIC [Error: RACE={2} CLASS={3}]", client.IP, client.Port, character.Race, character.Classe);
                 return;
             }
 
@@ -661,17 +655,17 @@ public class Functions
             packet.Dispose();
         }
 
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_TRIGGER_CINEMATIC", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_TRIGGER_CINEMATIC", client.IP, client.Port);
     }
 
-    public void SendTimeSyncReq(ClientClass client)
+    public static void SendTimeSyncReq(ClientClass client)
     {
         // Dim packet As New PacketClass(OPCODES.SMSG_TIME_SYNC_REQ)
         // packet.AddInt32(0)
         // Client.Send(packet)
     }
 
-    public void SendGameTime(ClientClass client, WcHandlerCharacter.CharacterObject character)
+    public static void SendGameTime(LegacyWorldCluster cluster, ClientClass client, WcHandlerCharacter.CharacterObject character)
     {
         PacketClass smsgLoginSettimespeed = new(Opcodes.SMSG_LOGIN_SETTIMESPEED);
         try
@@ -694,10 +688,10 @@ public class Functions
             smsgLoginSettimespeed.Dispose();
         }
 
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_LOGIN_SETTIMESPEED", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_LOGIN_SETTIMESPEED", client.IP, client.Port);
     }
 
-    public void SendProficiency(ClientClass client, byte proficiencyType, int proficiencyFlags)
+    public static void SendProficiency(LegacyWorldCluster cluster, ClientClass client, byte proficiencyType, int proficiencyFlags)
     {
         PacketClass packet = new(Opcodes.SMSG_SET_PROFICIENCY);
         try
@@ -711,10 +705,10 @@ public class Functions
             packet.Dispose();
         }
 
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_SET_PROFICIENCY", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_SET_PROFICIENCY", client.IP, client.Port);
     }
 
-    public void SendCorpseReclaimDelay(ClientClass client, WcHandlerCharacter.CharacterObject character, int seconds = 30)
+    public static void SendCorpseReclaimDelay(LegacyWorldCluster cluster, ClientClass client, WcHandlerCharacter.CharacterObject character, int seconds = 30)
     {
         PacketClass packet = new(Opcodes.SMSG_CORPSE_RECLAIM_DELAY);
         try
@@ -727,10 +721,10 @@ public class Functions
             packet.Dispose();
         }
 
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_CORPSE_RECLAIM_DELAY [{2}s]", client.IP, client.Port, seconds);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_CORPSE_RECLAIM_DELAY [{2}s]", client.IP, client.Port, seconds);
     }
 
-    public PacketClass BuildChatMessage(ulong senderGuid, string message, ChatMsg msgType, LANGUAGES msgLanguage, byte flag = 0, string msgChannel = "Global")
+    public static PacketClass BuildChatMessage(LegacyWorldCluster cluster, ulong senderGuid, string message, ChatMsg msgType, LANGUAGES msgLanguage, byte flag = 0, string msgChannel = "Global")
     {
         PacketClass packet = new(Opcodes.SMSG_MESSAGECHAT);
         try
@@ -779,13 +773,13 @@ public class Functions
                 case var case19 when case19 == ChatMsg.CHAT_MSG_MONSTER_EMOTE:
                 case var case20 when case20 == ChatMsg.CHAT_MSG_MONSTER_YELL:
                     {
-                        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.WARNING, "Use Creature.SendChatMessage() for this message type - {0}!", msgType);
+                        cluster.Log.WriteLine(LogType.WARNING, "Use Creature.SendChatMessage() for this message type - {0}!", msgType);
                         break;
                     }
 
                 default:
                     {
-                        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.WARNING, "Unknown chat message type - {0}!", msgType);
+                        cluster.Log.WriteLine(LogType.WARNING, "Unknown chat message type - {0}!", msgType);
                         break;
                     }
             }
@@ -796,7 +790,7 @@ public class Functions
         }
         catch (Exception)
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.FAILED, "failed chat message type - {0}!", msgType);
+            cluster.Log.WriteLine(LogType.FAILED, "failed chat message type - {0}!", msgType);
         }
 
         return packet;
@@ -852,7 +846,7 @@ public class Functions
         GROUP_UPDATE_FULL_REQUEST_REPLY = 0x7FFC0BFFU
     }
 
-    public PacketClass BuildPartyMemberStatsOffline(ulong guid)
+    public static PacketClass BuildPartyMemberStatsOffline(ulong guid)
     {
         PacketClass packet = new(Opcodes.SMSG_PARTY_MEMBER_STATS_FULL);
         packet.AddPackGuid(guid);

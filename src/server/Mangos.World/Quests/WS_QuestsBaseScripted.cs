@@ -17,45 +17,57 @@
 //
 
 using Mangos.World.Objects;
+using Mangos.World.Objects.Factories;
 using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 
 namespace Mangos.World.Quests;
 
 public class WS_QuestsBaseScripted : WS_QuestsBase
 {
-    public virtual void OnQuestStart(ref WS_PlayerData.CharacterObject objCharacter)
+    public WS_QuestsBaseScripted(
+        ILogger<WS_QuestsBaseScripted> logger,
+        WorldState worldState,
+        WS_QuestInfo quest,
+        ItemObjectFactory itemObjectFactory)
+        : base(logger, worldState, quest, itemObjectFactory)
+    {
+
+    }
+
+    public virtual void OnQuestStart(ref CharacterObject objCharacter)
     {
     }
 
-    public virtual void OnQuestComplete(ref WS_PlayerData.CharacterObject objCharacter)
+    public virtual void OnQuestComplete(ref CharacterObject objCharacter)
     {
     }
 
-    public virtual void OnQuestCancel(ref WS_PlayerData.CharacterObject objCharacter)
+    public virtual void OnQuestCancel(ref CharacterObject objCharacter)
     {
     }
 
-    public virtual void OnQuestItem(ref WS_PlayerData.CharacterObject objCharacter, int ItemID, int ItemCount)
+    public virtual void OnQuestItem(ref CharacterObject objCharacter, int ItemID, int ItemCount)
     {
     }
 
-    public virtual void OnQuestKill(ref WS_PlayerData.CharacterObject objCharacter, ref WS_Creatures.CreatureObject Creature)
+    public virtual void OnQuestKill(ref CharacterObject objCharacter, ref WS_Creatures.CreatureObject Creature)
     {
     }
 
-    public virtual void OnQuestCastSpell(ref WS_PlayerData.CharacterObject objCharacter, ref WS_Creatures.CreatureObject Creature, int SpellID)
+    public virtual void OnQuestCastSpell(ref CharacterObject objCharacter, ref WS_Creatures.CreatureObject Creature, int SpellID)
     {
     }
 
-    public virtual void OnQuestCastSpell(ref WS_PlayerData.CharacterObject objCharacter, ref WS_GameObjects.GameObject GameObject, int SpellID)
+    public virtual void OnQuestCastSpell(ref CharacterObject objCharacter, ref GameObject GameObject, int SpellID)
     {
     }
 
-    public virtual void OnQuestExplore(ref WS_PlayerData.CharacterObject objCharacter, int AreaID)
+    public virtual void OnQuestExplore(ref CharacterObject objCharacter, int AreaID)
     {
     }
 
-    public virtual void OnQuestEmote(ref WS_PlayerData.CharacterObject objCharacter, ref WS_Creatures.CreatureObject Creature, int EmoteID)
+    public virtual void OnQuestEmote(ref CharacterObject objCharacter, ref WS_Creatures.CreatureObject Creature, int EmoteID)
     {
     }
 }

@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.World.Objects.Factories.Loot;
 using System.Collections.Generic;
 
 namespace Mangos.World.Loots;
@@ -24,14 +25,20 @@ public partial class WS_Loot
 {
     public class LootTemplate
     {
+        private readonly WS_Loot loot;
+        private readonly LootItemFactory lootItemFactory;
+        private readonly LootGroupFactory lootGroupFactory;
         public List<LootStoreItem> Items;
 
         public Dictionary<byte, LootGroup> Groups;
 
-        public LootTemplate()
+        public LootTemplate(WS_Loot loot, LootItemFactory lootItemFactory, LootGroupFactory lootGroupFactory)
         {
             Items = new List<LootStoreItem>();
             Groups = new Dictionary<byte, LootGroup>();
+            this.loot = loot;
+            this.lootItemFactory = lootItemFactory;
+            this.lootGroupFactory = lootGroupFactory;
         }
 
         public void AddItem(ref LootStoreItem Item)
@@ -41,7 +48,7 @@ public partial class WS_Loot
                 case > 0 when Item.MinCountOrRef > 0:
                     if (!Groups.ContainsKey(Item.Group))
                     {
-                        Groups.Add(Item.Group, new LootGroup());
+                        Groups.Add(Item.Group, lootGroupFactory.Create());
                     }
                     Groups[Item.Group].AddItem(ref Item);
                     break;
@@ -71,7 +78,7 @@ public partial class WS_Loot
                     }
                     if (Items[i].MinCountOrRef < 0)
                     {
-                        var Referenced = WorldServiceLocator.WSLoot.LootTemplates_Reference.GetLoot(-Items[i].MinCountOrRef);
+                        var Referenced = WS_Loot.LootTemplates_Reference.GetLoot(-Items[i].MinCountOrRef);
                         if (Referenced != null)
                         {
                             int maxCount = Items[i].MaxCount;
@@ -88,7 +95,7 @@ public partial class WS_Loot
                         var Item = (items2 = Items)[index = i];
                         items2[index] = Item;
                         var items = Loot.Items;
-                        LootItem item = new(ref Item);
+                        var item = lootItemFactory.Create(ref Item);
                         items.Add(item);
                     }
                 }

@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Common.Legacy;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections.Generic;
@@ -24,19 +25,12 @@ namespace Mangos.Cluster.Network;
 
 public class WcNetwork
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
-
-    public WcNetwork(ClusterServiceLocator clusterServiceLocator)
-    {
-        _clusterServiceLocator = clusterServiceLocator;
-    }
-
-    public WorldServerClass WorldServer => _clusterServiceLocator.WorldServerClass;
+    public WorldServerClass WorldServer { get; set; }
 
     public int MsTime()
     {
-        // DONE: Calculate the clusters timeGetTime("")
-        return _clusterServiceLocator.NativeMethods.timeGetTime("");
+        // DONE: Calculate the clusters TimeGetTime("")
+        return LegacyNativeMethods.TimeGetTime("");
     }
 
     public Dictionary<uint, DateTime> LastConnections = new();

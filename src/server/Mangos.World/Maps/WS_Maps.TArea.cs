@@ -39,7 +39,7 @@ public partial class WS_Maps
 
         public string Name;
 
-        public bool IsMyLand(ref WS_PlayerData.CharacterObject objCharacter)
+        public bool IsMyLand(ref CharacterObject objCharacter)
         {
             if (Team == AreaTeam.AREATEAM_NONE)
             {

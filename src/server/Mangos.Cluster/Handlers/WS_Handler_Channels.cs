@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Globals;
 using Mangos.Common.Enums.Channel;
 using Mangos.Common.Enums.Chat;
@@ -42,7 +43,9 @@ public class WsHandlerChannels
 
     public class ChatChannelClass : IDisposable
     {
-        private readonly ClusterServiceLocator _clusterServiceLocator;
+        private readonly LegacyWorldCluster cluster;
+        private readonly WsHandlerChannels channels;
+        private readonly WcHandlerCharacter character;
 
         // This is server-side ID
         public long Id;
@@ -52,6 +55,7 @@ public class WsHandlerChannels
 
         public byte ChannelFlags;
         public string ChannelName;
+        private readonly WsDbcDatabase database;
         public string Password = "";
         public bool Announce = true;
         public bool Moderate = true;
@@ -64,6 +68,13 @@ public class WsHandlerChannels
 
         private bool _disposedValue; // To detect redundant calls
 
+        public ChatChannelClass(LegacyWorldCluster cluster, WsHandlerChannels channels, WcHandlerCharacter character)
+        {
+            this.cluster = cluster;
+            this.channels = channels;
+            this.character = character;
+        }
+
         // IDisposable
         protected virtual void Dispose(bool disposing)
         {
@@ -71,7 +82,7 @@ public class WsHandlerChannels
             {
                 // TODO: free unmanaged resources (unmanaged objects) and override Finalize() below.
                 // TODO: set large fields to null.
-                _clusterServiceLocator.WsHandlerChannels.ChatChanneLs.Remove(ChannelName.ToUpper());
+                channels.ChatChanneLs.Remove(ChannelName.ToUpper());
             }
 
             _disposedValue = true;
@@ -85,15 +96,17 @@ public class WsHandlerChannels
             GC.SuppressFinalize(this);
         }
 
-        public ChatChannelClass(string name, ClusterServiceLocator clusterServiceLocator)
+        public ChatChannelClass(string name, WsDbcDatabase database, WsHandlerChannels channels)
         {
-            Id = clusterServiceLocator.WsHandlerChannels.GetNexyChatChannelId();
+            Id = channels.GetNexyChatChannelId();
             ChannelIndex = 0;
             ChannelName = name;
+            this.database = database;
+            this.channels = channels;
             ChannelFlags = (byte)CHANNEL_FLAG.CHANNEL_FLAG_NONE;
-            clusterServiceLocator.WsHandlerChannels.ChatChanneLs.Add(ChannelName, this);
+            channels.ChatChanneLs.Add(ChannelName, this);
             var sZone = name[(name.IndexOf(" - ", StringComparison.Ordinal) + 3)..];
-            foreach (var chatChannel in clusterServiceLocator.WsDbcDatabase.ChatChannelsInfo)
+            foreach (var chatChannel in database.ChatChannelsInfo)
             {
                 if ((chatChannel.Value.Name.Replace("%s", sZone).ToUpper() ?? "") == (name.ToUpper() ?? ""))
                 {
@@ -102,14 +115,14 @@ public class WsHandlerChannels
                 }
             }
 
-            if (clusterServiceLocator.WsDbcDatabase.ChatChannelsInfo.ContainsKey(ChannelIndex))
+            if (database.ChatChannelsInfo.ContainsKey(ChannelIndex))
             {
                 // Default channel
                 ChannelFlags = (byte)(ChannelFlags | (byte)CHANNEL_FLAG.CHANNEL_FLAG_GENERAL);
                 Announce = false;
                 Moderate = false;
                 {
-                    var withBlock = clusterServiceLocator.WsDbcDatabase.ChatChannelsInfo[ChannelIndex];
+                    var withBlock = database.ChatChannelsInfo[ChannelIndex];
                     if (((ChatChannelsFlags)withBlock.Flags & ChatChannelsFlags.FLAG_TRADE) == ChatChannelsFlags.FLAG_TRADE)
                     {
                         ChannelFlags = (byte)(ChannelFlags | (byte)CHANNEL_FLAG.CHANNEL_FLAG_TRADE);
@@ -130,8 +143,6 @@ public class WsHandlerChannels
                 // Custom channel
                 ChannelFlags = (byte)((CHANNEL_FLAG)ChannelFlags | CHANNEL_FLAG.CHANNEL_FLAG_CUSTOM);
             }
-
-            _clusterServiceLocator = clusterServiceLocator;
         }
 
         public void Say(string message, int msgLang, WcHandlerCharacter.CharacterObject character)
@@ -150,10 +161,10 @@ public class WsHandlerChannels
             }
             else
             {
-                var packet = _clusterServiceLocator.Functions.BuildChatMessage(character.Guid, message, ChatMsg.CHAT_MSG_CHANNEL, (LANGUAGES)msgLang, (byte)character.ChatFlag, ChannelName);
+                var packet = GlobalFunctions.BuildChatMessage(cluster, character.Guid, message, ChatMsg.CHAT_MSG_CHANNEL, (LANGUAGES)msgLang, (byte)character.ChatFlag, ChannelName);
                 Broadcast(packet);
                 packet.Dispose();
-                _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.USER, "[{0}:{1}] SMSG_MESSAGECHAT [{2}: <{3}> {4}]", character.Client.IP, character.Client.Port, ChannelName, character.Name, message);
+                cluster.Log.WriteLine(LogType.USER, "[{0}:{1}] SMSG_MESSAGECHAT [{2}: <{3}> {4}]", character.Client.IP, character.Client.Port, ChannelName, character.Name, message);
             }
         }
 
@@ -220,7 +231,7 @@ public class WsHandlerChannels
             }
 
             // DONE: If new channel, set owner
-            if (_clusterServiceLocator.Functions.HaveFlags(ChannelFlags, (byte)CHANNEL_FLAG.CHANNEL_FLAG_CUSTOM) && Owner == 0m)
+            if (GlobalFunctions.HaveFlags(ChannelFlags, (byte)CHANNEL_FLAG.CHANNEL_FLAG_CUSTOM) && Owner == 0m)
             {
                 SetOwner(character);
             }
@@ -281,99 +292,99 @@ public class WsHandlerChannels
             }
 
             // DONE: Set new owner
-            if (_clusterServiceLocator.Functions.HaveFlags(ChannelFlags, (byte)CHANNEL_FLAG.CHANNEL_FLAG_CUSTOM) && Owner == character.Guid && Joined.Count > 0)
+            if (GlobalFunctions.HaveFlags(ChannelFlags, (byte)CHANNEL_FLAG.CHANNEL_FLAG_CUSTOM) && Owner == character.Guid && Joined.Count > 0)
             {
                 IEnumerator tmp = Joined.GetEnumerator();
                 tmp.MoveNext();
-                var tmp1 = _clusterServiceLocator.WorldCluster.CharacteRs;
+                var tmp1 = cluster.CharacteRs;
                 var argCharacter = tmp1[Conversions.ToULong(tmp.Current)];
                 SetOwner(argCharacter);
                 tmp1[Conversions.ToULong(tmp.Current)] = argCharacter;
             }
 
             // DONE: If free and not global - clear channel
-            if (_clusterServiceLocator.Functions.HaveFlags(ChannelFlags, (byte)CHANNEL_FLAG.CHANNEL_FLAG_CUSTOM) && Joined.Count == 0)
+            if (GlobalFunctions.HaveFlags(ChannelFlags, (byte)CHANNEL_FLAG.CHANNEL_FLAG_CUSTOM) && Joined.Count == 0)
             {
-                _clusterServiceLocator.WsHandlerChannels.ChatChanneLs.Remove(ChannelName);
+                channels.ChatChanneLs.Remove(ChannelName);
                 Dispose();
             }
         }
 
-        public virtual void Kick(WcHandlerCharacter.CharacterObject character, string name)
+        public virtual void Kick(WcHandlerCharacter.CharacterObject characterObject, string name)
         {
-            var victimGuid = _clusterServiceLocator.WcHandlerCharacter.GetCharacterGuidByName(name);
-            if (!Joined.Contains(character.Guid))
+            var victimGuid = character.GetCharacterGuidByName(cluster, database, name);
+            if (!Joined.Contains(characterObject.Guid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, character.Guid, default, default);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, characterObject.Guid, default, default);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
-            else if (!Moderators.Contains(character.Guid))
+            else if (!Moderators.Contains(characterObject.Guid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_MODERATOR, character.Guid, default, default);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_MODERATOR, characterObject.Guid, default, default);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
-            else if (!_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(victimGuid))
+            else if (!cluster.CharacteRs.ContainsKey(victimGuid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, character.Guid, default, name);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, characterObject.Guid, default, name);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else if (!Joined.Contains(victimGuid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, character.Guid, default, name);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, characterObject.Guid, default, name);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else
             {
                 // DONE: You Left channel
-                var packet1 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_YOU_LEFT, character.Guid, default, default);
-                _clusterServiceLocator.WorldCluster.CharacteRs[victimGuid].Client.Send(packet1);
+                var packet1 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_YOU_LEFT, characterObject.Guid, default, default);
+                cluster.CharacteRs[victimGuid].Client.Send(packet1);
                 packet1.Dispose();
                 Joined.Remove(victimGuid);
                 JoinedMode.Remove(victimGuid);
-                _clusterServiceLocator.WorldCluster.CharacteRs[victimGuid].JoinedChannels.Remove(ChannelName.ToUpper());
+                cluster.CharacteRs[victimGuid].JoinedChannels.Remove(ChannelName.ToUpper());
 
                 // DONE: [%s] Player %s kicked by %s.
-                var packet2 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_KICKED, victimGuid, character.Guid, default);
+                var packet2 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_KICKED, victimGuid, characterObject.Guid, default);
                 Broadcast(packet2);
                 packet2.Dispose();
             }
         }
 
-        public virtual void Ban(WcHandlerCharacter.CharacterObject character, string name)
+        public virtual void Ban(WcHandlerCharacter.CharacterObject characterObject, string name)
         {
-            var victimGuid = _clusterServiceLocator.WcHandlerCharacter.GetCharacterGuidByName(name);
-            if (!Joined.Contains(character.Guid))
+            var victimGuid = character.GetCharacterGuidByName(cluster, database, name);
+            if (!Joined.Contains(characterObject.Guid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, character.Guid, default, default);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, characterObject.Guid, default, default);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
-            else if (!Moderators.Contains(character.Guid))
+            else if (!Moderators.Contains(characterObject.Guid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_MODERATOR, character.Guid, default, default);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_MODERATOR, characterObject.Guid, default, default);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
-            else if (!_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(victimGuid))
+            else if (!cluster.CharacteRs.ContainsKey(victimGuid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, character.Guid, default, name);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, characterObject.Guid, default, name);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else if (!Joined.Contains(victimGuid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, character.Guid, default, name);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, characterObject.Guid, default, name);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else if (Banned.Contains(victimGuid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_PLAYER_INVITE_BANNED, character.Guid, default, name);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_PLAYER_INVITE_BANNED, characterObject.Guid, default, name);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else
@@ -381,45 +392,45 @@ public class WsHandlerChannels
                 Banned.Add(victimGuid);
 
                 // DONE: [%s] Player %s banned by %s.
-                var packet2 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_BANNED, victimGuid, character.Guid, default);
+                var packet2 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_BANNED, victimGuid, characterObject.Guid, default);
                 Broadcast(packet2);
                 packet2.Dispose();
                 Joined.Remove(victimGuid);
                 JoinedMode.Remove(victimGuid);
-                _clusterServiceLocator.WorldCluster.CharacteRs[victimGuid].JoinedChannels.Remove(ChannelName.ToUpper());
+                cluster.CharacteRs[victimGuid].JoinedChannels.Remove(ChannelName.ToUpper());
 
                 // DONE: You Left channel
-                var packet1 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_YOU_LEFT, character.Guid, default, default);
-                _clusterServiceLocator.WorldCluster.CharacteRs[victimGuid].Client.Send(packet1);
+                var packet1 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_YOU_LEFT, characterObject.Guid, default, default);
+                cluster.CharacteRs[victimGuid].Client.Send(packet1);
                 packet1.Dispose();
             }
         }
 
-        public virtual void UnBan(WcHandlerCharacter.CharacterObject character, string name)
+        public virtual void UnBan(WcHandlerCharacter.CharacterObject characterObject, string name)
         {
-            var victimGuid = _clusterServiceLocator.WcHandlerCharacter.GetCharacterGuidByName(name);
-            if (!Joined.Contains(character.Guid))
+            var victimGuid = character.GetCharacterGuidByName(cluster, database, name);
+            if (!Joined.Contains(characterObject.Guid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, character.Guid, default, default);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, characterObject.Guid, default, default);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
-            else if (!Moderators.Contains(character.Guid))
+            else if (!Moderators.Contains(characterObject.Guid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_MODERATOR, character.Guid, default, default);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_MODERATOR, characterObject.Guid, default, default);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
-            else if (!_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(victimGuid))
+            else if (!cluster.CharacteRs.ContainsKey(victimGuid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, character.Guid, default, name);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, characterObject.Guid, default, name);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else if (!Banned.Contains(victimGuid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_BANNED, character.Guid, default, name);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_BANNED, characterObject.Guid, default, name);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else
@@ -427,7 +438,7 @@ public class WsHandlerChannels
                 Banned.Remove(victimGuid);
 
                 // DONE: [%s] Player %s unbanned by %s.
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_UNBANNED, victimGuid, character.Guid, default);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_UNBANNED, victimGuid, characterObject.Guid, default);
                 Broadcast(packet);
                 packet.Dispose();
             }
@@ -459,52 +470,52 @@ public class WsHandlerChannels
             }
         }
 
-        public void Invite(WcHandlerCharacter.CharacterObject character, string name)
+        public void Invite(WcHandlerCharacter.CharacterObject characterObject, string name)
         {
-            if (!Joined.Contains(character.Guid))
+            if (!Joined.Contains(characterObject.Guid))
             {
-                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, character.Guid, default, default);
-                character.Client.Send(packet);
+                var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON, characterObject.Guid, default, default);
+                characterObject.Client.Send(packet);
                 packet.Dispose();
             }
             else
             {
-                var guid = _clusterServiceLocator.WcHandlerCharacter.GetCharacterGuidByName(name);
-                if (!_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid))
+                var guid = character.GetCharacterGuidByName(cluster, database, name);
+                if (!cluster.CharacteRs.ContainsKey(guid))
                 {
-                    var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, character.Guid, default, name);
-                    character.Client.Send(packet);
+                    var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_NOT_ON_FOR_NAME, characterObject.Guid, default, name);
+                    characterObject.Client.Send(packet);
                     packet.Dispose();
                 }
-                else if (_clusterServiceLocator.Functions.GetCharacterSide((byte)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Race) != _clusterServiceLocator.Functions.GetCharacterSide((byte)character.Race))
+                else if (GlobalFunctions.GetCharacterSide((byte)cluster.CharacteRs[guid].Race) != GlobalFunctions.GetCharacterSide((byte)characterObject.Race))
                 {
-                    var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_INVITED_WRONG_FACTION, character.Guid, default, default);
-                    character.Client.Send(packet);
+                    var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_INVITED_WRONG_FACTION, characterObject.Guid, default, default);
+                    characterObject.Client.Send(packet);
                     packet.Dispose();
                 }
                 else if (Joined.Contains(guid))
                 {
                     var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_ALREADY_ON, guid, default, default);
-                    character.Client.Send(packet);
+                    characterObject.Client.Send(packet);
                     packet.Dispose();
                 }
                 else if (Banned.Contains(guid))
                 {
                     var packet = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_PLAYER_INVITE_BANNED, guid, default, name);
-                    character.Client.Send(packet);
+                    characterObject.Client.Send(packet);
                     packet.Dispose();
                 }
-                else if (_clusterServiceLocator.WorldCluster.CharacteRs[guid].IgnoreList.Contains(character.Guid))
+                else if (cluster.CharacteRs[guid].IgnoreList.Contains(characterObject.Guid))
                 {
                 }
                 // ?
                 else
                 {
-                    var packet1 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_PLAYER_INVITED, character.Guid, default, _clusterServiceLocator.WorldCluster.CharacteRs[guid].Name);
-                    character.Client.Send(packet1);
+                    var packet1 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_PLAYER_INVITED, characterObject.Guid, default, cluster.CharacteRs[guid].Name);
+                    characterObject.Client.Send(packet1);
                     packet1.Dispose();
-                    var packet2 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_INVITED, character.Guid, default, default);
-                    _clusterServiceLocator.WorldCluster.CharacteRs[guid].Client.Send(packet2);
+                    var packet2 = BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_INVITED, characterObject.Guid, default, default);
+                    cluster.CharacteRs[guid].Client.Send(packet2);
                     packet2.Dispose();
                 }
             }
@@ -530,7 +541,7 @@ public class WsHandlerChannels
 
             foreach (var guid in Joined.ToArray())
             {
-                if ((_clusterServiceLocator.WorldCluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
+                if ((cluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
                 {
                     return true;
                 }
@@ -552,7 +563,7 @@ public class WsHandlerChannels
             else
             {
                 p = Owner > 0m
-                    ? BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_WHO_OWNER, character.Guid, default, _clusterServiceLocator.WorldCluster.CharacteRs[Owner].Name)
+                    ? BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_WHO_OWNER, character.Guid, default, cluster.CharacteRs[Owner].Name)
                     : BuildChannelNotify(CHANNEL_NOTIFY_FLAGS.CHANNEL_WHO_OWNER, character.Guid, default, "Nobody");
             }
 
@@ -671,7 +682,7 @@ public class WsHandlerChannels
             {
                 foreach (var guid in Joined.ToArray())
                 {
-                    if ((_clusterServiceLocator.WorldCluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
+                    if ((cluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
                     {
                         var flags = JoinedMode[guid];
                         JoinedMode[guid] = (byte)((CHANNEL_USER_FLAG)JoinedMode[guid] | CHANNEL_USER_FLAG.CHANNEL_FLAG_MODERATOR);
@@ -711,7 +722,7 @@ public class WsHandlerChannels
             {
                 foreach (var guid in Joined.ToArray())
                 {
-                    if ((_clusterServiceLocator.WorldCluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
+                    if ((cluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
                     {
                         var flags = JoinedMode[guid];
                         JoinedMode[guid] = (byte)((CHANNEL_USER_FLAG)JoinedMode[guid] ^ CHANNEL_USER_FLAG.CHANNEL_FLAG_MODERATOR);
@@ -747,7 +758,7 @@ public class WsHandlerChannels
             {
                 foreach (var guid in Joined.ToArray())
                 {
-                    if ((_clusterServiceLocator.WorldCluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
+                    if ((cluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
                     {
                         var flags = JoinedMode[guid];
                         JoinedMode[guid] = (byte)((CHANNEL_USER_FLAG)JoinedMode[guid] | CHANNEL_USER_FLAG.CHANNEL_FLAG_MUTED);
@@ -787,7 +798,7 @@ public class WsHandlerChannels
             {
                 foreach (var guid in Joined.ToArray())
                 {
-                    if ((_clusterServiceLocator.WorldCluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
+                    if ((cluster.CharacteRs[guid].Name.ToUpper() ?? "") == (name.ToUpper() ?? ""))
                     {
                         var flags = JoinedMode[guid];
                         JoinedMode[guid] = (byte)((CHANNEL_USER_FLAG)JoinedMode[guid] ^ CHANNEL_USER_FLAG.CHANNEL_FLAG_MUTED);
@@ -809,7 +820,7 @@ public class WsHandlerChannels
         {
             foreach (var guid in Joined.ToArray())
             {
-                _clusterServiceLocator.WorldCluster.CharacteRs[guid].Client.SendMultiplyPackets(p);
+                cluster.CharacteRs[guid].Client.SendMultiplyPackets(p);
             }
         }
 
@@ -904,7 +915,7 @@ public class WsHandlerChannels
 
                 default:
                     {
-                        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.WARNING, "Probably wrong channel function used for SendChannelNotify({0})", notify);
+                        cluster.Log.WriteLine(LogType.WARNING, "Probably wrong channel function used for SendChannelNotify({0})", notify);
                         break;
                     }
             }

@@ -16,31 +16,18 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-namespace Mangos.Common.Legacy;
+using Mangos.World.Maps;
+using Mangos.World.Objects.Factories.Packets;
+using Mangos.World.Services;
+using Microsoft.Extensions.Logging;
+using static Mangos.World.Objects.WS_Base;
+using static Mangos.World.Objects.WS_DynamicObjects;
 
-public class Functions
+namespace Mangos.World.Objects.Factories;
+public class DynamicObjectFactory(ILogger<DynamicObject> logger, WorldState worldState, WS_Maps maps, IMapTileLoader mapTileLoader, UpdateClassFactory updateClassFactory)
 {
-    public string UppercaseFirstLetter(string val)
+    public DynamicObject Create(ref BaseUnit caster, int spellId, float posX, float posY, float posZ, int duration, float radius)
     {
-        if (string.IsNullOrEmpty(val))
-        {
-            return val;
-        }
-
-        var array = val.ToCharArray();
-        array[0] = char.ToUpper(array[0]);
-        return new string(array);
-    }
-
-    public string LowercaseFirstLetter(string val)
-    {
-        if (string.IsNullOrEmpty(val))
-        {
-            return val;
-        }
-
-        var array = val.ToCharArray();
-        array[0] = char.ToLower(array[0]);
-        return new string(array);
+        return new DynamicObject(logger, worldState, ref caster, maps, mapTileLoader, updateClassFactory, spellId, posX, posY, posZ, duration, radius);
     }
 }

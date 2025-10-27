@@ -16,10 +16,12 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
+using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
 using Mangos.World.Globals;
-using Mangos.World.Gossip;
+using Mangos.World.Objects.Factories.Gossip;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
@@ -32,6 +34,9 @@ namespace Mangos.World.Objects;
 public class CreatureInfo : IDisposable
 {
     private bool _disposedValue;
+    private readonly ILogger<CreatureInfo> logger;
+    private readonly WorldState worldState;
+    private readonly WorldDatabase worldDatabase;
 
     public int Id;
 
@@ -135,9 +140,9 @@ public class CreatureInfo : IDisposable
 
     public TBaseTalk TalkScript;
 
-    public int Life => WorldServiceLocator.WorldServer.Rnd.Next(MinLife, MaxLife);
+    public int Life => WorldState.Rnd.Next(MinLife, MaxLife);
 
-    public int Mana => WorldServiceLocator.WorldServer.Rnd.Next(MinMana, MaxMana);
+    public int Mana => WorldState.Rnd.Next(MinMana, MaxMana);
 
     public int GetRandomModel
     {
@@ -167,7 +172,7 @@ public class CreatureInfo : IDisposable
                     modelIDs[current] = ModelH2;
                     current++;
                 }
-                return current == 0 ? 0 : modelIDs[WorldServiceLocator.WorldServer.Rnd.Next(0, current)];
+                return current == 0 ? 0 : modelIDs[WorldState.Rnd.Next(0, current)];
             }
         }
     }
@@ -180,30 +185,50 @@ public class CreatureInfo : IDisposable
             {
                 return ModelA1;
             }
+
             if (ModelA2 != 0)
             {
                 return ModelA2;
             }
+
             if (ModelH1 != 0)
             {
                 return ModelH1;
             }
+
             return ModelH2 != 0 ? ModelH2 : 0;
         }
     }
 
-    public CreatureInfo(int CreatureID)
-        : this()
+    public CreatureInfo(
+        ILogger<CreatureInfo> logger,
+        WorldState worldState,
+        WorldDatabase worldDatabase,
+        GuardTalkFactory guardTalkFactory)
+    {
+        this.logger = logger;
+        this.worldState = worldState;
+        this.worldDatabase = worldDatabase;
+    }
+
+    public CreatureInfo(
+        ILogger<CreatureInfo> logger,
+        WorldState worldState,
+        WorldDatabase worldDatabase,
+        GuardTalkFactory guardTalkFactory,
+        int CreatureID)
+        : this(logger, worldState, worldDatabase, guardTalkFactory)
     {
         Id = CreatureID;
-        WorldServiceLocator.WorldServer.CREATURESDatabase.Add(Id, this);
+        worldState.CreaturesDatabase.Add(Id, this);
         DataTable MySQLQuery = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM creature_template LEFT JOIN creature_template_spells ON creature_template.entry = creature_template_spells.`entry` WHERE creature_template.entry = {CreatureID};", ref MySQLQuery);
+        worldDatabase.Query($"SELECT * FROM creature_template LEFT JOIN creature_template_spells ON creature_template.entry = creature_template_spells.`entry` WHERE creature_template.entry = {CreatureID};", ref MySQLQuery);
         if (MySQLQuery.Rows.Count == 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "CreatureID {0} not found in SQL database.", CreatureID);
+            logger.LogError("CreatureID {0} not found in SQL database.", CreatureID);
             return;
         }
+
         ModelA1 = MySQLQuery.Rows[0].As<int>("modelid1");
         ModelA2 = MySQLQuery.Rows[0].As<int>("Modelid2");
         ModelH1 = MySQLQuery.Rows[0].As<int>("modelid3");
@@ -270,28 +295,32 @@ public class CreatureInfo : IDisposable
         Resistances[6] = MySQLQuery.Rows[0].As<int>("ResistanceArcane");
         EquipmentID = MySQLQuery.Rows[0].As<int>("EquipmentTemplateId");
         MechanicImmune = MySQLQuery.Rows[0].As<uint>("SchoolImmuneMask");
-        if (File.Exists("scripts\\gossip\\" + WorldServiceLocator.Functions.FixName(Name) + ".vb"))
+        if (File.Exists("scripts\\gossip\\" + Globals.Functions.FixName(Name) + ".vb"))
         {
-            ScriptedObject tmpScript = new("scripts\\gossip\\" + WorldServiceLocator.Functions.FixName(Name) + ".vb", "", InMemory: true);
+            ScriptedObject tmpScript = new("scripts\\gossip\\" + Globals.Functions.FixName(Name) + ".vb", "", InMemory: true);
             TalkScript = (TBaseTalk)tmpScript.InvokeConstructor("TalkScript");
             tmpScript.Dispose();
         }
-        else if (((uint)cNpcFlags & 0x10u) != 0)
-        {
-            TalkScript = new WS_NPCs.TDefaultTalk();
-        }
-        else if (((uint)cNpcFlags & 0x40u) != 0)
-        {
-            TalkScript = new WS_GuardGossip.TGuardTalk();
-        }
-        else if (cNpcFlags == 0)
+        else
         {
             TalkScript = null;
         }
-        else
-        {
-            TalkScript = cNpcFlags == 1 ? new WS_NPCs.TDefaultTalk() : new WS_NPCs.TDefaultTalk();
-        }
+        //else if (((uint)cNpcFlags & 0x10u) != 0)
+        //{
+        //    TalkScript = defaultTalkFactory.Create();
+        //}
+        //else if (((uint)cNpcFlags & 0x40u) != 0)
+        //{
+        //    TalkScript = guardTalkFactory.Create();
+        //}
+        //else if (cNpcFlags == 0)
+        //{
+        //    TalkScript = null;
+        //}
+        //else
+        //{
+        //    TalkScript = cNpcFlags == 1 ? defaultTalkFactory.Create() : defaultTalkFactory.Create();
+        //}
     }
 
     public CreatureInfo()
@@ -319,8 +348,8 @@ public class CreatureInfo : IDisposable
         AttackPower = 0;
         RangedAttackPower = 0;
         Resistances = new int[7];
-        WalkSpeed = WorldServiceLocator.GlobalConstants.UNIT_NORMAL_WALK_SPEED;
-        RunSpeed = WorldServiceLocator.GlobalConstants.UNIT_NORMAL_RUN_SPEED;
+        WalkSpeed = MangosGlobalConstants.UNIT_NORMAL_WALK_SPEED;
+        RunSpeed = MangosGlobalConstants.UNIT_NORMAL_RUN_SPEED;
         BaseAttackTime = 2000;
         BaseRangedAttackTime = 2000;
         LevelMin = 1;
@@ -350,7 +379,7 @@ public class CreatureInfo : IDisposable
     {
         if (!_disposedValue)
         {
-            WorldServiceLocator.WorldServer.CREATURESDatabase.Remove(Id);
+            worldState.CreaturesDatabase.Remove(Id);
         }
         _disposedValue = true;
     }

@@ -23,7 +23,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddMangosLogger(this IServiceCollection services)
     {
-        services.AddSingleton<IMangosLogger, MangosLogger>();
+        services.AddSingleton<IMangosLogger, MangosLoggerAdapter>();
 
         return services;
     }

@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Globals;
 using Mangos.Cluster.Network;
 using Mangos.Common.Enums.Chat;
@@ -32,11 +33,14 @@ namespace Mangos.Cluster.Handlers.Guild;
 
 public partial class WcGuild
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly LegacyWorldCluster cluster;
+    private readonly WsDbcDatabase database;
 
-    public WcGuild(ClusterServiceLocator clusterServiceLocator)
+    public WcGuild(LegacyWorldCluster cluster, WsDbcDatabase database)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.cluster = cluster;
+        this.database = database;
+        ;
     }
 
     public Dictionary<uint, Guild> GuilDs = new();
@@ -44,7 +48,7 @@ public partial class WcGuild
     // Basic Guild Framework
     public void AddCharacterToGuild(WcHandlerCharacter.CharacterObject objCharacter, int guildId, int guildRank = 4)
     {
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = {2}, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", guildId, objCharacter.Guid, guildRank));
+        database.GetCharacterDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = {2}, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", guildId, objCharacter.Guid, guildRank));
         if (GuilDs.ContainsKey((uint)guildId) == false)
         {
             Guild tmpGuild = new((uint)guildId);
@@ -59,12 +63,12 @@ public partial class WcGuild
 
     public void AddCharacterToGuild(ulong guid, int guildId, int guildRank = 4)
     {
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = {2}, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", guildId, guid, guildRank));
+        database.GetAccountDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = {2}, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", guildId, guid, guildRank));
     }
 
     public void RemoveCharacterFromGuild(WcHandlerCharacter.CharacterObject objCharacter)
     {
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = 0, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", 0, objCharacter.Guid));
+        database.GetAccountDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = 0, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", 0, objCharacter.Guid));
         objCharacter.Guild.Members.Remove(objCharacter.Guid);
         objCharacter.Guild = null;
         objCharacter.GuildRank = 0;
@@ -73,7 +77,7 @@ public partial class WcGuild
 
     public void RemoveCharacterFromGuild(ulong guid)
     {
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = 0, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", 0, guid));
+        database.GetAccountDatabase().Update(string.Format("UPDATE characters SET char_guildId = {0}, char_guildRank = 0, char_guildOffNote = '', char_guildPNote = '' WHERE char_guid = {1};", 0, guid));
     }
 
     public void BroadcastChatMessageGuild(WcHandlerCharacter.CharacterObject sender, string message, LANGUAGES language, int guildId)
@@ -93,17 +97,17 @@ public partial class WcGuild
         }
 
         // DONE: Build packet
-        var packet = _clusterServiceLocator.Functions.BuildChatMessage(sender.Guid, message, ChatMsg.CHAT_MSG_GUILD, language, (byte)sender.ChatFlag);
+        var packet = GlobalFunctions.BuildChatMessage(cluster, sender.Guid, message, ChatMsg.CHAT_MSG_GUILD, language, (byte)sender.ChatFlag);
 
         // DONE: Send message to everyone
         var tmpArray = sender.Guild.Members.ToArray();
         foreach (var member in tmpArray)
         {
-            if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(member))
+            if (cluster.CharacteRs.ContainsKey(member))
             {
-                if (_clusterServiceLocator.WorldCluster.CharacteRs[member].IsGuildRightSet(GuildRankRights.GR_RIGHT_GCHATLISTEN))
+                if (cluster.CharacteRs[member].IsGuildRightSet(GuildRankRights.GR_RIGHT_GCHATLISTEN))
                 {
-                    _clusterServiceLocator.WorldCluster.CharacteRs[member].Client.SendMultiplyPackets(packet);
+                    cluster.CharacteRs[member].Client.SendMultiplyPackets(packet);
                 }
             }
         }
@@ -128,17 +132,17 @@ public partial class WcGuild
         }
 
         // DONE: Build packet
-        var packet = _clusterServiceLocator.Functions.BuildChatMessage(sender.Guid, message, ChatMsg.CHAT_MSG_OFFICER, language, (byte)sender.ChatFlag);
+        var packet = GlobalFunctions.BuildChatMessage(cluster, sender.Guid, message, ChatMsg.CHAT_MSG_OFFICER, language, (byte)sender.ChatFlag);
 
         // DONE: Send message to everyone
         var tmpArray = sender.Guild.Members.ToArray();
         foreach (var member in tmpArray)
         {
-            if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(member))
+            if (cluster.CharacteRs.ContainsKey(member))
             {
-                if (_clusterServiceLocator.WorldCluster.CharacteRs[member].IsGuildRightSet(GuildRankRights.GR_RIGHT_OFFCHATLISTEN))
+                if (cluster.CharacteRs[member].IsGuildRightSet(GuildRankRights.GR_RIGHT_OFFCHATLISTEN))
                 {
-                    _clusterServiceLocator.WorldCluster.CharacteRs[member].Client.SendMultiplyPackets(packet);
+                    cluster.CharacteRs[member].Client.SendMultiplyPackets(packet);
                 }
             }
         }
@@ -198,7 +202,7 @@ public partial class WcGuild
 
         // DONE: Count the members
         DataTable members = new();
-        _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query("SELECT char_online, char_guid, char_name, char_class, char_level, char_zone_id, char_logouttime, char_guildRank, char_guildPNote, char_guildOffNote FROM characters WHERE char_guildId = " + objCharacter.Guild.Id + ";", ref members);
+        database.GetAccountDatabase().Query("SELECT char_online, char_guid, char_name, char_class, char_level, char_zone_id, char_logouttime, char_guildRank, char_guildPNote, char_guildOffNote FROM characters WHERE char_guildId = " + objCharacter.Guild.Id + ";", ref members);
         PacketClass response = new(Opcodes.SMSG_GUILD_ROSTER);
         response.AddInt32(members.Rows.Count);
         response.AddString(objCharacter.Guild.Motd);
@@ -245,7 +249,7 @@ public partial class WcGuild
                 response.AddInt32(members.Rows[i].As<int>("char_zone_id"));
                 // 0 = < 1 hour / 0.1 = 2.4 hours / 1 = 24 hours (1 day)
                 // (Time logged out / 86400) = Days offline
-                var daysOffline = (float)((_clusterServiceLocator.Functions.GetTimestamp(DateAndTime.Now) - members.Rows[i].As<uint>("char_logouttime")) / (double)DateInterval.Day);
+                var daysOffline = (float)((GlobalFunctions.GetTimestamp(DateAndTime.Now) - members.Rows[i].As<uint>("char_logouttime")) / (double)DateInterval.Day);
                 response.AddSingle(daysOffline); // Days offline
                 response.AddString(members.Rows[i].As<string>("char_guildPNote"));
                 if (officer)
@@ -301,9 +305,9 @@ public partial class WcGuild
                 continue;
             }
 
-            if (_clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(member))
+            if (cluster.CharacteRs.ContainsKey(member))
             {
-                _clusterServiceLocator.WorldCluster.CharacteRs[member].Client.SendMultiplyPackets(packet);
+                cluster.CharacteRs[member].Client.SendMultiplyPackets(packet);
             }
         }
     }

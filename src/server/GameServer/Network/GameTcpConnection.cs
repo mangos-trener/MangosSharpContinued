@@ -75,7 +75,7 @@ internal sealed class GameTcpConnection : ITcpConnection
 
     private async Task ExecuteHandlerAsync(IHandlerDispatcher dispatcher, Memory<byte> body, Socket socket, CancellationToken cancellationToken)
     {
-        using var result = await dispatcher.ExectueAsync(new PacketReader(body));
+        using var result = await dispatcher.ExecuteAsync(new PacketReader(body));
         using var memoryOwner = memoryPool.Rent(MAX_PACKET_LENGTH);
         foreach (var response in result.GetResponseMessages())
         {

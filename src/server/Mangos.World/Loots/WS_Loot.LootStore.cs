@@ -18,6 +18,8 @@
 
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
+using Mangos.World.Objects.Factories.Loot;
 using Microsoft.VisualBasic;
 using System;
 using System.Collections;
@@ -31,13 +33,17 @@ public partial class WS_Loot
 {
     public class LootStore
     {
+        private readonly WorldDatabase worldDatabase;
+        private readonly LootTemplateFactory lootTemplateFactory;
         private readonly string Name;
 
         private readonly Dictionary<int, LootTemplate> Templates;
 
-        public LootStore(string Name)
+        public LootStore(WorldDatabase worldDatabase, LootTemplateFactory lootTemplateFactory, string Name)
         {
             Templates = new Dictionary<int, LootTemplate>();
+            this.worldDatabase = worldDatabase;
+            this.lootTemplateFactory = lootTemplateFactory;
             this.Name = Name;
         }
 
@@ -48,10 +54,10 @@ public partial class WS_Loot
 
         private LootTemplate CreateTemplate(int Entry)
         {
-            LootTemplate newTemplate = new();
+            var newTemplate = lootTemplateFactory.Create();
             Templates.Add(Entry, newTemplate);
             DataTable MysqlQuery = new();
-            WorldServiceLocator.WorldServer.WorldDatabase.Query(string.Format("SELECT {0}.*,conditions.type,conditions.value1, conditions.value2 FROM {0} LEFT JOIN conditions ON {0}.`condition_id`=conditions.`condition_entry` WHERE entry = {1};", Name, Entry), ref MysqlQuery);
+            worldDatabase.Query(string.Format("SELECT {0}.*,conditions.type,conditions.value1, conditions.value2 FROM {0} LEFT JOIN conditions ON {0}.`condition_id`=conditions.`condition_entry` WHERE entry = {1};", Name, Entry), ref MysqlQuery);
             if (MysqlQuery.Rows.Count == 0)
             {
                 Templates[Entry] = null;

@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Cluster.Globals;
 using Mangos.Cluster.Network;
 using Mangos.Common.Enums.Global;
@@ -28,11 +29,15 @@ namespace Mangos.Cluster.Handlers;
 
 public class WcHandlersBattleground
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly LegacyWorldCluster cluster;
+    private readonly WcNetwork network;
+    private readonly WsDbcDatabase database;
 
-    public WcHandlersBattleground(ClusterServiceLocator clusterServiceLocator)
+    public WcHandlersBattleground(LegacyWorldCluster cluster, WcNetwork network, WsDbcDatabase database)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.cluster = cluster;
+        this.network = network;
+        this.database = database;
     }
 
     public void On_CMSG_BATTLEFIELD_PORT(PacketClass packet, ClientClass client)
@@ -47,7 +52,7 @@ public class WcHandlersBattleground
         var action = (byte)packet.GetUInt8();                 // enter battle 0x1, leave queue 0x0
 
         // _WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BATTLEFIELD_PORT [MapType: {2}, Action: {3}, Unk1: {4}, Unk2: {5}, ID: {6}]", client.IP, client.Port, MapType, Action, Unk1, Unk2, ID)
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BATTLEFIELD_PORT [Action: {1}, ID: {2}]", client.IP, client.Port, action, id);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BATTLEFIELD_PORT [Action: {1}, ID: {2}]", client.IP, client.Port, action, id);
         if (action == 0)
         {
             BattlefielDs[(int)id].Leave(client.Character);
@@ -65,7 +70,7 @@ public class WcHandlersBattleground
         var unk2 = packet.GetInt8();
         var mapType = (uint)packet.GetInt32();
         uint id = packet.GetUInt16();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_LEAVE_BATTLEFIELD [MapType: {2}, Unk1: {3}, Unk2: {4}, ID: {5}]", client.IP, client.Port, mapType, unk1, unk2, id);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_LEAVE_BATTLEFIELD [MapType: {2}, Unk1: {3}, Unk2: {4}, ID: {5}]", client.IP, client.Port, mapType, unk1, unk2, id);
         BattlefielDs[(int)id].Leave(client.Character);
     }
 
@@ -81,7 +86,7 @@ public class WcHandlersBattleground
         var mapType = (uint)packet.GetInt32();
         var instance = (uint)packet.GetInt32();
         var asGroup = packet.GetInt8();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BATTLEMASTER_JOIN [MapType: {2}, Instance: {3}, Group: {4}, GUID: {5}]", client.IP, client.Port, mapType, instance, asGroup, guid);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BATTLEMASTER_JOIN [MapType: {2}, Instance: {3}, Group: {4}, GUID: {5}]", client.IP, client.Port, mapType, instance, asGroup, guid);
         GetBattlefield((BattlefieldMapType)mapType, (byte)client.Character.Level).Enqueue(client.Character);
     }
 
@@ -91,7 +96,7 @@ public class WcHandlersBattleground
 
     public class Battlefield : IDisposable
     {
-        private readonly ClusterServiceLocator _clusterServiceLocator;
+        private readonly LegacyWorldCluster cluster;
 
         private readonly List<WcHandlerCharacter.CharacterObject> _queueTeam1 = new();
         private readonly List<WcHandlerCharacter.CharacterObject> _queueTeam2 = new();
@@ -101,6 +106,8 @@ public class WcHandlersBattleground
         private readonly List<WcHandlerCharacter.CharacterObject> _membersTeam2 = new();
         public readonly int Id;
         private readonly uint _map;
+        private readonly WcHandlersBattleground battleground;
+        private readonly WsDbcDatabase database;
         public readonly BattlefieldMapType MapType;
         public BattlefieldType Type;
         internal readonly byte LevelMin;
@@ -109,20 +116,22 @@ public class WcHandlersBattleground
         private readonly int _minPlayersPerTeam = 10;
         private readonly Timer _bfTimer;
 
-        public Battlefield(BattlefieldMapType rMapType, byte rLevel, uint rMap, ClusterServiceLocator clusterServiceLocator)
+        public Battlefield(BattlefieldMapType rMapType, byte rLevel, uint rMap, LegacyWorldCluster cluster, WcHandlersBattleground battleground, WsDbcDatabase database)
         {
-            _clusterServiceLocator = clusterServiceLocator;
-            Id = Interlocked.Increment(ref _clusterServiceLocator.WcHandlersBattleground._battlefielDsCounter);
+            Id = Interlocked.Increment(ref battleground._battlefielDsCounter);
             LevelMin = 0;
             LevelMax = 60;
             MapType = rMapType;
             _map = rMap;
-            _maxPlayersPerTeam = _clusterServiceLocator.WsDbcDatabase.Battlegrounds[(byte)rMapType].MaxPlayersPerTeam;
-            _minPlayersPerTeam = _clusterServiceLocator.WsDbcDatabase.Battlegrounds[(byte)rMapType].MinPlayersPerTeam;
-            _clusterServiceLocator.WcHandlersBattleground.BattlefielDsLock.AcquireWriterLock(_clusterServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-            _clusterServiceLocator.WcHandlersBattleground.BattlefielDs.Add(Id, this);
-            _clusterServiceLocator.WcHandlersBattleground.BattlefielDsLock.ReleaseWriterLock();
+            this.battleground = battleground;
+            this.database = database;
+            _maxPlayersPerTeam = database.Battlegrounds[(byte)rMapType].MaxPlayersPerTeam;
+            _minPlayersPerTeam = database.Battlegrounds[(byte)rMapType].MinPlayersPerTeam;
+            battleground.BattlefielDsLock.AcquireWriterLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
+            battleground.BattlefielDs.Add(Id, this);
+            battleground.BattlefielDsLock.ReleaseWriterLock();
             _bfTimer = new Timer(Update, null, 20000, 20000);
+            this.cluster = cluster;
         }
 
         private bool _disposedValue; // To detect redundant calls
@@ -134,9 +143,9 @@ public class WcHandlersBattleground
             {
                 // TODO: free unmanaged resources (unmanaged objects) and override Finalize() below.
                 // TODO: set large fields to null.
-                _clusterServiceLocator.WcHandlersBattleground.BattlefielDsLock.AcquireWriterLock(_clusterServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-                _clusterServiceLocator.WcHandlersBattleground.BattlefielDs.Remove(Id);
-                _clusterServiceLocator.WcHandlersBattleground.BattlefielDsLock.ReleaseWriterLock();
+                battleground.BattlefielDsLock.AcquireWriterLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
+                battleground.BattlefielDs.Remove(Id);
+                battleground.BattlefielDsLock.ReleaseWriterLock();
                 _bfTimer.Dispose();
             }
 
@@ -185,7 +194,7 @@ public class WcHandlersBattleground
         /// <returns></returns>
         public void Enqueue(WcHandlerCharacter.CharacterObject objCharacter)
         {
-            if (_clusterServiceLocator.Functions.GetCharacterSide((byte)objCharacter.Race))
+            if (GlobalFunctions.GetCharacterSide((byte)objCharacter.Race))
             {
                 _queueTeam1.Add(objCharacter);
             }
@@ -220,7 +229,7 @@ public class WcHandlersBattleground
 
                 SendBattlegroundStatus(objCharacter, 0);
                 {
-                    var withBlock = _clusterServiceLocator.WsDbcDatabase.WorldSafeLocs[_clusterServiceLocator.WsDbcDatabase.Battlegrounds[(byte)MapType].AllianceStartLoc];
+                    var withBlock = database.WorldSafeLocs[database.Battlegrounds[(byte)MapType].AllianceStartLoc];
                     // TODO: WTF? characters_locations table? when?
                     // Dim q As New DataTable
                     // _WorldCluster.CharacterDatabase.Query(String.Format("SELECT char_guid FROM characters_locations WHERE char_guid = {0};", objCharacter.GUID), q)
@@ -229,7 +238,7 @@ public class WcHandlersBattleground
                     // _WorldCluster.CharacterDatabase.Update(String.Format("INSERT INTO characters_locations(char_guid, char_positionX, char_positionY, char_positionZ, char_zone_id, char_map_id, char_orientation) VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6});", _
                     // objCharacter.GUID, Trim(Str(objCharacter.PositionX)), Trim(Str(objCharacter.PositionY)), Trim(Str(objCharacter.PositionZ)), objCharacter.Zone, objCharacter.Map, 0))
                     // End If
-                    objCharacter.Transfer(withBlock.X, withBlock.Y, withBlock.Z, _clusterServiceLocator.WsDbcDatabase.Battlegrounds[(byte)MapType].AllianceStartO, (int)withBlock.Map);
+                    objCharacter.Transfer(withBlock.X, withBlock.Y, withBlock.Z, database.Battlegrounds[(byte)MapType].AllianceStartO, (int)withBlock.Map);
                 }
             }
         }
@@ -351,7 +360,7 @@ public class WcHandlersBattleground
     public Battlefield GetBattlefield(BattlefieldMapType mapType, byte level)
     {
         Battlefield battlefield = null;
-        BattlefielDsLock.AcquireReaderLock(_clusterServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
+        BattlefielDsLock.AcquireReaderLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
         foreach (var b in BattlefielDs)
         {
             if (b.Value.MapType == mapType && b.Value.LevelMax >= level && b.Value.LevelMin <= level)
@@ -366,9 +375,9 @@ public class WcHandlersBattleground
         if (battlefield is null)
         {
             var map = (uint)GetBattleGrounMapIdByTypeId((BattleGroundTypeId)mapType);
-            if (_clusterServiceLocator.WcNetwork.WorldServer.BattlefieldCheck(map))
+            if (network.WorldServer.BattlefieldCheck(map))
             {
-                battlefield = new Battlefield(mapType, level, map, _clusterServiceLocator);
+                battlefield = new Battlefield(mapType, level, map, cluster, this, database);
             }
             else
             {

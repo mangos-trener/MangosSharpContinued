@@ -16,14 +16,5 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using System;
-
-namespace Mangos.Common.Legacy;
-
-public class NativeMethods
-{
-    public int timeGetTime(string dummy)
-    {
-        return Environment.TickCount;
-    }
-}
+namespace Mangos.Common.Legacy.Databases;
+public class WorldDatabase : SQL;

@@ -16,8 +16,8 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.World.Network;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Text;
@@ -26,7 +26,7 @@ namespace Mangos.World.Globals;
 
 public partial class Packets
 {
-    public void DumpPacket(byte[] data, WS_Network.ClientClass client = null, int start = 0)
+    public static void DumpPacket(ILogger logger, byte[] data, WS_Network.ClientClass client = null, int start = 0)
     {
         var buffer = "";
         checked
@@ -73,13 +73,13 @@ public partial class Packets
                     buffer += new string(' ', 16 - (checked(data.Length - start) % 16));
                     buffer = buffer + " |" + Environment.NewLine;
                 }
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, buffer, null);
+                logger.LogDebug(buffer, null);
             }
             catch (Exception ex)
             {
                 ProjectData.SetProjectError(ex);
                 var e = ex;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Error dumping packet: {0}{1}", Environment.NewLine, e.ToString());
+                logger.LogError("Error dumping packet: {0}{1}", Environment.NewLine, e.ToString());
                 ProjectData.ClearProjectError();
             }
         }
