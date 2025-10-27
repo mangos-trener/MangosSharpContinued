@@ -20,42 +20,45 @@ using Mangos.Cluster.Globals;
 using Mangos.Cluster.Network;
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy;
 using System.Collections.Generic;
 
 namespace Mangos.Cluster.Handlers;
 
 public class WcHandlersMisc
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly LegacyWorldCluster cluster;
+    private readonly WcNetwork network;
 
-    public WcHandlersMisc(ClusterServiceLocator clusterServiceLocator)
+    public WcHandlersMisc(LegacyWorldCluster cluster, WcNetwork network)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.cluster = cluster;
+        this.network = network;
     }
 
     public void On_CMSG_QUERY_TIME(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_QUERY_TIME", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_QUERY_TIME", client.IP, client.Port);
         PacketClass response = new(Opcodes.SMSG_QUERY_TIME_RESPONSE);
-        response.AddInt32(_clusterServiceLocator.NativeMethods.timeGetTime("")); // GetTimestamp(Now))
+        response.AddInt32(LegacyNativeMethods.TimeGetTime("")); // GetTimestamp(Now))
         client.Send(response);
         response.Dispose();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_QUERY_TIME_RESPONSE", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_QUERY_TIME_RESPONSE", client.IP, client.Port);
     }
 
     public void On_CMSG_NEXT_CINEMATIC_CAMERA(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_NEXT_CINEMATIC_CAMERA", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_NEXT_CINEMATIC_CAMERA", client.IP, client.Port);
     }
 
     public void On_CMSG_COMPLETE_CINEMATIC(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_COMPLETE_CINEMATIC", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_COMPLETE_CINEMATIC", client.IP, client.Port);
     }
 
     public void On_CMSG_PLAYED_TIME(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_NAME_QUERY", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_NAME_QUERY", client.IP, client.Port);
         PacketClass response = new(Opcodes.SMSG_PLAYED_TIME);
         response.AddInt32(1);
         response.AddInt32(1);
@@ -72,15 +75,15 @@ public class WcHandlersMisc
 
         packet.GetInt16();
         var guid = packet.GetUInt64();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_NAME_QUERY [GUID={2:X}]", client.IP, client.Port, guid);
-        if (_clusterServiceLocator.CommonGlobalFunctions.GuidIsPlayer(guid) && _clusterServiceLocator.WorldCluster.CharacteRs.ContainsKey(guid))
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_NAME_QUERY [GUID={2:X}]", client.IP, client.Port, guid);
+        if (Common.Legacy.Globals.LegacyGlobalFunctions.GuidIsPlayer(guid) && cluster.CharacteRs.ContainsKey(guid))
         {
             PacketClass smsgNameQueryResponse = new(Opcodes.SMSG_NAME_QUERY_RESPONSE);
             smsgNameQueryResponse.AddUInt64(guid);
-            smsgNameQueryResponse.AddString(_clusterServiceLocator.WorldCluster.CharacteRs[guid].Name);
-            smsgNameQueryResponse.AddInt32((byte)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Race);
-            smsgNameQueryResponse.AddInt32(_clusterServiceLocator.WorldCluster.CharacteRs[guid].Gender);
-            smsgNameQueryResponse.AddInt32((byte)_clusterServiceLocator.WorldCluster.CharacteRs[guid].Classe);
+            smsgNameQueryResponse.AddString(cluster.CharacteRs[guid].Name);
+            smsgNameQueryResponse.AddInt32((byte)cluster.CharacteRs[guid].Race);
+            smsgNameQueryResponse.AddInt32(cluster.CharacteRs[guid].Gender);
+            smsgNameQueryResponse.AddInt32((byte)cluster.CharacteRs[guid].Classe);
             smsgNameQueryResponse.AddInt8(0);
             client.Send(smsgNameQueryResponse);
             smsgNameQueryResponse.Dispose();
@@ -94,7 +97,7 @@ public class WcHandlersMisc
             }
             catch
             {
-                _clusterServiceLocator.WcNetwork.WorldServer.Disconnect("NULL", new List<uint> { client.Character.Map });
+                network.WorldServer.Disconnect("NULL", new List<uint> { client.Character.Map });
             }
         }
     }
@@ -103,7 +106,7 @@ public class WcHandlersMisc
     {
         packet.GetInt16();
         var guid = packet.GetUInt64();
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_INSPECT [GUID={2:X}]", client.IP, client.Port, guid);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_INSPECT [GUID={2:X}]", client.IP, client.Port, guid);
     }
 
     public void On_CMSG_CANCEL_TRADE(PacketClass packet, ClientClass client)
@@ -116,18 +119,18 @@ public class WcHandlersMisc
             }
             catch
             {
-                _clusterServiceLocator.WcNetwork.WorldServer.Disconnect("NULL", new List<uint> { client.Character.Map });
+                network.WorldServer.Disconnect("NULL", new List<uint> { client.Character.Map });
             }
         }
         else
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_CANCEL_TRADE", client.IP, client.Port);
+            cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_CANCEL_TRADE", client.IP, client.Port);
         }
     }
 
     public void On_CMSG_LOGOUT_CANCEL(PacketClass packet, ClientClass client)
     {
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_LOGOUT_CANCEL", client.IP, client.Port);
+        cluster.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_LOGOUT_CANCEL", client.IP, client.Port);
     }
 
     // Public Sub On_CMSG_MOVE_TIME_SKIPPED(Bypacket As PacketClass, Byclient As ClientClass)

@@ -21,10 +21,15 @@ using Mangos.Common.Enums.Item;
 using Mangos.Common.Enums.Spell;
 using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
 using Mangos.World.Globals;
+using Mangos.World.Loots;
 using Mangos.World.Network;
+using Mangos.World.Objects.Factories;
+using Mangos.World.Objects.Factories.Spells;
 using Mangos.World.Player;
 using Mangos.World.Spells;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections.Generic;
@@ -59,7 +64,9 @@ public class WS_Items
         public readonly int BuyPrice;
 
         public readonly int SellPrice;
-
+        private readonly ILogger<WS_Items> logger;
+        private readonly WorldState worldState;
+        private readonly WorldDatabase worldDatabase;
         public readonly int Id;
 
         public readonly int Flags;
@@ -466,16 +473,18 @@ public class WS_Items
             Spells[4] = new TItemSpellInfo();
         }
 
-        public ItemInfo(int itemId)
+        public ItemInfo(WorldState worldState, WorldDatabase worldDatabase, int itemId)
             : this()
         {
+            this.worldState = worldState;
+            this.worldDatabase = worldDatabase;
             Id = itemId;
-            WorldServiceLocator.WorldServer.ITEMDatabase.Add(Id, this);
+            worldState.ItemDatabase.Add(Id, this);
             DataTable mySqlQuery = new();
-            WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM item_template WHERE entry = {itemId};", ref mySqlQuery);
+            worldDatabase.Query($"SELECT * FROM item_template WHERE entry = {itemId};", ref mySqlQuery);
             if (mySqlQuery.Rows.Count == 0)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "ItemID {0} not found in SQL database! Loading default \"Unknown Item\" info.", itemId);
+                logger.LogError("ItemID {0} not found in SQL database! Loading default \"Unknown Item\" info.", itemId);
                 return;
             }
             Model = mySqlQuery.Rows[0].As<int>("displayid");
@@ -631,7 +640,7 @@ public class WS_Items
         {
             if (!_disposedValue)
             {
-                WorldServiceLocator.WorldServer.ITEMDatabase.Remove(Id);
+                worldState.ItemDatabase.Remove(Id);
             }
             _disposedValue = true;
         }
@@ -712,8 +721,16 @@ public class WS_Items
     private readonly int[] ItemWeaponSkills;
 
     private readonly int[] ItemArmorSkills;
+    private readonly ILogger<WS_Items> logger;
+    private readonly WorldState worldState;
+    private readonly WorldDatabase worldDatabase;
+    private readonly WS_Loot loot;
+    private readonly ItemObjectFactory itemObjectFactory;
+    private readonly ItemInfoFactory itemInfoFactory;
+    private readonly SpellTargetsFactory spellTargetsFactory;
+    private readonly CastSpellParametersFactory castSpellParametersFactory;
 
-    public WS_Items()
+    public WS_Items(ILogger<WS_Items> logger, WorldState worldState, WorldDatabase worldDatabase, WS_Loot loot, ItemObjectFactory itemObjectFactory, ItemInfoFactory itemInfoFactory, SpellTargetsFactory spellTargetsFactory, CastSpellParametersFactory castSpellParametersFactory)
     {
         ItemWeaponSkills = new int[21]
         {
@@ -752,22 +769,33 @@ public class WS_Items
                 0,
                 0
         };
+        this.logger = logger;
+        this.worldState = worldState;
+        this.worldDatabase = worldDatabase;
+        this.loot = loot;
+        this.itemObjectFactory = itemObjectFactory;
+        this.itemInfoFactory = itemInfoFactory;
+        this.spellTargetsFactory = spellTargetsFactory;
+        this.castSpellParametersFactory = castSpellParametersFactory;
     }
 
-    public ItemObject LoadItemByGUID(ulong guid, WS_PlayerData.CharacterObject owner = null, bool equipped = false)
+    public ItemObject LoadItemByGUID(ulong guid, CharacterObject owner = null, bool equipped = false)
     {
         checked
         {
-            return WorldServiceLocator.WorldServer.WORLD_ITEMs.ContainsKey(guid + WorldServiceLocator.GlobalConstants.GUID_ITEM)
-                ? WorldServiceLocator.WorldServer.WORLD_ITEMs[guid + WorldServiceLocator.GlobalConstants.GUID_ITEM]
-                : new ItemObject(guid, owner, equipped);
+            return worldState.WorldItems.ContainsKey(guid + MangosGlobalConstants.GUID_ITEM)
+                ? worldState.WorldItems[guid + MangosGlobalConstants.GUID_ITEM]
+                : itemObjectFactory.Create(guid, owner, equipped: equipped);
         }
     }
 
     public void SendItemInfo(ref WS_Network.ClientClass client, int itemID)
     {
         Packets.PacketClass response = new(Opcodes.SMSG_ITEM_QUERY_SINGLE_RESPONSE);
-        var item = WorldServiceLocator.WorldServer.ITEMDatabase.ContainsKey(itemID) ? WorldServiceLocator.WorldServer.ITEMDatabase[itemID] : new ItemInfo(itemID);
+        var item = worldState.ItemDatabase.ContainsKey(itemID)
+            ? worldState.ItemDatabase[itemID]
+            : itemInfoFactory.Create(itemID);
+
         response.AddInt32(item.Id);
         response.AddInt32((int)item.ObjectClass);
         if (item.ObjectClass == ITEM_CLASS.ITEM_CLASS_CONSUMABLE)
@@ -834,7 +862,7 @@ public class WS_Items
             var i = 0;
             do
             {
-                if (!WorldServiceLocator.WSSpells.SPELLs.ContainsKey(item.Spells[i].SpellID))
+                if (!WS_Spells.SPELLs.ContainsKey(item.Spells[i].SpellID))
                 {
                     response.AddInt32(0);
                     response.AddInt32(0);
@@ -856,9 +884,9 @@ public class WS_Items
                     }
                     else
                     {
-                        response.AddInt32(WorldServiceLocator.WSSpells.SPELLs[item.Spells[i].SpellID].SpellCooldown);
-                        response.AddInt32(WorldServiceLocator.WSSpells.SPELLs[item.Spells[i].SpellID].Category);
-                        response.AddInt32(WorldServiceLocator.WSSpells.SPELLs[item.Spells[i].SpellID].CategoryCooldown);
+                        response.AddInt32(WS_Spells.SPELLs[item.Spells[i].SpellID].SpellCooldown);
+                        response.AddInt32(WS_Spells.SPELLs[item.Spells[i].SpellID].Category);
+                        response.AddInt32(WS_Spells.SPELLs[item.Spells[i].SpellID].CategoryCooldown);
                     }
                 }
                 i++;
@@ -901,7 +929,7 @@ public class WS_Items
         {
             packet.GetInt16();
             var itemID = packet.GetInt32();
-            var item = WorldServiceLocator.WorldServer.ITEMDatabase.ContainsKey(itemID) ? WorldServiceLocator.WorldServer.ITEMDatabase[itemID] : new ItemInfo(itemID);
+            var item = worldState.ItemDatabase.ContainsKey(itemID) ? worldState.ItemDatabase[itemID] : itemInfoFactory.Create(itemID);
             Packets.PacketClass response = new(Opcodes.SMSG_ITEM_NAME_QUERY_RESPONSE);
             response.AddInt32(itemID);
             response.AddString(item.Name);
@@ -918,7 +946,7 @@ public class WS_Items
             packet.GetInt16();
             var srcSlot = packet.GetInt8();
             var dstSlot = packet.GetInt8();
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_SWAP_INV_ITEM [srcSlot=0:{2}, dstSlot=0:{3}]", client.IP, client.Port, srcSlot, dstSlot);
+            logger.LogDebug("[{0}:{1}] CMSG_SWAP_INV_ITEM [srcSlot=0:{2}, dstSlot=0:{3}]", client.IP, client.Port, srcSlot, dstSlot);
             client.Character.ItemSWAP(0, srcSlot, 0, dstSlot);
         }
     }
@@ -938,7 +966,7 @@ public class WS_Items
             {
                 srcBag = 0;
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_AUTOEQUIP_ITEM [srcSlot={3}:{2}]", client.IP, client.Port, srcSlot, srcBag);
+            logger.LogDebug("[{0}:{1}] CMSG_AUTOEQUIP_ITEM [srcSlot={3}:{2}]", client.IP, client.Port, srcSlot, srcBag);
             byte errCode = 20;
             if (client.Character.ItemGET(srcBag, srcSlot).OwnerGUID != client.Character.GUID)
             {
@@ -1015,7 +1043,7 @@ public class WS_Items
         {
             ProjectData.SetProjectError(ex);
             var err = ex;
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "[{0}:{1}] Unable to equip item. {2}{3}", client.IP, client.Port, Environment.NewLine, err.ToString());
+            logger.LogError("[{0}:{1}] Unable to equip item. {2}{3}", client.IP, client.Port, Environment.NewLine, err.ToString());
             ProjectData.ClearProjectError();
         }
     }
@@ -1036,11 +1064,11 @@ public class WS_Items
             {
                 dstBag = 0;
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_AUTOSTORE_BAG_ITEM [srcSlot={3}:{2}, dstBag={4}]", client.IP, client.Port, srcSlot, srcBag, dstBag);
+            logger.LogDebug("[{0}:{1}] CMSG_AUTOSTORE_BAG_ITEM [srcSlot={3}:{2}, dstBag={4}]", client.IP, client.Port, srcSlot, srcBag, dstBag);
             var character = client.Character;
             Dictionary<ulong, ItemObject> wORLD_ITEMs;
             ulong key;
-            var Item = (wORLD_ITEMs = WorldServiceLocator.WorldServer.WORLD_ITEMs)[key = client.Character.ItemGetGUID(srcBag, srcSlot)];
+            var Item = (wORLD_ITEMs = worldState.WorldItems)[key = client.Character.ItemGetGUID(srcBag, srcSlot)];
             var num = character.ItemADD_AutoBag(ref Item, dstBag);
             wORLD_ITEMs[key] = Item;
             if (num)
@@ -1068,7 +1096,7 @@ public class WS_Items
             {
                 srcBag = 0;
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_SWAP_ITEM [srcSlot={4}:{2}, dstSlot={5}:{3}]", client.IP, client.Port, srcSlot, dstSlot, srcBag, dstBag);
+            logger.LogDebug("[{0}:{1}] CMSG_SWAP_ITEM [srcSlot={4}:{2}, dstSlot={5}:{3}]", client.IP, client.Port, srcSlot, dstSlot, srcBag, dstBag);
             client.Character.ItemSWAP(srcBag, srcSlot, dstBag, dstSlot);
         }
     }
@@ -1091,7 +1119,7 @@ public class WS_Items
             {
                 srcBag = 0;
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_SPLIT_ITEM [srcSlot={3}:{2}, dstBag={5}:{4}, count={6}]", client.IP, client.Port, srcSlot, srcBag, dstSlot, dstBag, count);
+            logger.LogDebug("[{0}:{1}] CMSG_SPLIT_ITEM [srcSlot={3}:{2}, dstBag={5}:{4}, count={6}]", client.IP, client.Port, srcSlot, srcBag, dstSlot, dstBag, count);
             if ((srcBag != dstBag || srcSlot != dstSlot) && count > 0)
             {
                 client.Character.ItemSPLIT(srcBag, srcSlot, dstBag, dstSlot, count);
@@ -1112,7 +1140,7 @@ public class WS_Items
         {
             srcBag = 0;
         }
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_READ_ITEM [srcSlot={3}:{2}]", client.IP, client.Port, srcSlot, srcBag);
+        logger.LogDebug("[{0}:{1}] CMSG_READ_ITEM [srcSlot={3}:{2}]", client.IP, client.Port, srcSlot, srcBag);
         short opcode = 175;
         var guid = 0uL;
         if (srcBag == 0)
@@ -1150,9 +1178,9 @@ public class WS_Items
             packet.GetInt16();
             var pageID = packet.GetInt32();
             var itemGuid = packet.GetUInt64();
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_PAGE_TEXT_QUERY [pageID={2}, itemGuid={3:X}]", client.IP, client.Port, pageID, itemGuid);
+            logger.LogDebug("[{0}:{1}] CMSG_PAGE_TEXT_QUERY [pageID={2}, itemGuid={3:X}]", client.IP, client.Port, pageID, itemGuid);
             DataTable mySqlQuery = new();
-            WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM page_text WHERE entry = \"{pageID}\";", ref mySqlQuery);
+            worldDatabase.Query($"SELECT * FROM page_text WHERE entry = \"{pageID}\";", ref mySqlQuery);
             Packets.PacketClass response = new(Opcodes.SMSG_PAGE_TEXT_QUERY_RESPONSE);
             response.AddInt32(pageID);
             if (mySqlQuery.Rows.Count != 0)
@@ -1193,7 +1221,7 @@ public class WS_Items
             {
                 itemBag = 0;
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_WRAP_ITEM [{2}:{3} -> {4}{5}]", client.IP, client.Port, giftBag, giftSlot, itemBag, itemSlot);
+            logger.LogDebug("[{0}:{1}] CMSG_WRAP_ITEM [{2}:{3} -> {4}{5}]", client.IP, client.Port, giftBag, giftSlot, itemBag, itemSlot);
             var gift = client.Character.ItemGET(giftBag, giftSlot);
             var item = client.Character.ItemGET(itemBag, itemSlot);
             if (gift == null || item == null)
@@ -1221,14 +1249,14 @@ public class WS_Items
                 {
                     srcBag = 0;
                 }
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_DESTROYITEM [srcSlot={3}:{2}  count={4}]", client.IP, client.Port, srcSlot, srcBag, count);
+                logger.LogDebug("[{0}:{1}] CMSG_DESTROYITEM [srcSlot={3}:{2}  count={4}]", client.IP, client.Port, srcSlot, srcBag, count);
                 if (srcBag == 0)
                 {
                     if (!client.Character.Items.ContainsKey(srcSlot))
                     {
                         return;
                     }
-                    WorldServiceLocator.WorldServer.ALLQUESTS.OnQuestItemRemove(ref client.Character, client.Character.Items[srcSlot].ItemEntry, count);
+                    worldState.QuestsService.OnQuestItemRemove(ref client.Character, client.Character.Items[srcSlot].ItemEntry, count);
                     if ((count == 0) | (count >= client.Character.Items[srcSlot].StackCount))
                     {
                         if (srcSlot < 23u)
@@ -1252,7 +1280,7 @@ public class WS_Items
                 }
                 if (client.Character.Items.ContainsKey(srcBag) && client.Character.Items[srcBag].Items.ContainsKey(srcSlot))
                 {
-                    WorldServiceLocator.WorldServer.ALLQUESTS.OnQuestItemRemove(ref client.Character, client.Character.Items[srcBag].Items[srcSlot].ItemEntry, count);
+                    worldState.QuestsService.OnQuestItemRemove(ref client.Character, client.Character.Items[srcBag].Items[srcSlot].ItemEntry, count);
                     if ((count == 0) | (count >= client.Character.Items[srcBag].Items[srcSlot].StackCount))
                     {
                         client.Character.ItemREMOVE(srcBag, srcSlot, Destroy: true, Update: true);
@@ -1267,7 +1295,7 @@ public class WS_Items
             {
                 ProjectData.SetProjectError(ex);
                 var e = ex;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Error destroying item.{0}", Environment.NewLine + e);
+                logger.LogDebug("Error destroying item.{0}", Environment.NewLine + e);
                 ProjectData.ClearProjectError();
             }
         }
@@ -1289,23 +1317,23 @@ public class WS_Items
             }
             var slot = packet.GetInt8();
             var tmp3 = packet.GetInt8();
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_USE_ITEM [bag={2} slot={3} tmp3={4}]", client.IP, client.Port, bag, slot, tmp3);
+            logger.LogDebug("[{0}:{1}] CMSG_USE_ITEM [bag={2} slot={3} tmp3={4}]", client.IP, client.Port, bag, slot, tmp3);
             if (((uint)client.Character.cUnitFlags & 0x100000u) != 0)
             {
                 return;
             }
             var itemGuid = client.Character.ItemGetGUID(bag, slot);
-            if (!WorldServiceLocator.WorldServer.WORLD_ITEMs.ContainsKey(itemGuid))
+            if (!worldState.WorldItems.ContainsKey(itemGuid))
             {
                 SendInventoryChangeFailure(ref client.Character, InventoryChangeFailure.EQUIP_ERR_ITEM_NOT_FOUND, 0uL, 0uL);
                 return;
             }
-            var itemInfo = WorldServiceLocator.WorldServer.WORLD_ITEMs[itemGuid].ItemInfo;
+            var itemInfo = worldState.WorldItems[itemGuid].ItemInfo;
             var InstantCast = false;
             byte j = 0;
             do
             {
-                if (WorldServiceLocator.WSSpells.SPELLs.ContainsKey(itemInfo.Spells[j].SpellID) && (client.Character.cUnitFlags & 0x80000) == 524288 && ((uint)WorldServiceLocator.WSSpells.SPELLs[itemInfo.Spells[j].SpellID].Attributes & 0x10000000u) != 0)
+                if (WS_Spells.SPELLs.ContainsKey(itemInfo.Spells[j].SpellID) && (client.Character.cUnitFlags & 0x80000) == 524288 && ((uint)WS_Spells.SPELLs[itemInfo.Spells[j].SpellID].Attributes & 0x10000000u) != 0)
                 {
                     SendInventoryChangeFailure(ref client.Character, InventoryChangeFailure.EQUIP_ERR_CANT_DO_IN_COMBAT, itemGuid, 0uL);
                     return;
@@ -1321,25 +1349,25 @@ public class WS_Items
                 SendInventoryChangeFailure(ref client.Character, InventoryChangeFailure.EQUIP_ERR_YOU_ARE_DEAD, itemGuid, 0uL);
                 return;
             }
-            if (itemInfo.ObjectClass != 0 && WorldServiceLocator.WorldServer.WORLD_ITEMs[itemGuid].ItemInfo.Bonding == 3 && !WorldServiceLocator.WorldServer.WORLD_ITEMs[itemGuid].IsSoulBound)
+            if (itemInfo.ObjectClass != 0 && worldState.WorldItems[itemGuid].ItemInfo.Bonding == 3 && !worldState.WorldItems[itemGuid].IsSoulBound)
             {
-                WorldServiceLocator.WorldServer.WORLD_ITEMs[itemGuid].SoulbindItem(client);
+                worldState.WorldItems[itemGuid].SoulbindItem(client);
             }
-            WS_Spells.SpellTargets targets = new();
+            var targets = spellTargetsFactory.Create();
             var spellTargets = targets;
             ref var character = ref client.Character;
             ref var reference = ref character;
             WS_Base.BaseObject Caster = character;
             spellTargets.ReadTargets(ref packet, ref Caster);
-            reference = (WS_PlayerData.CharacterObject)Caster;
+            reference = (CharacterObject)Caster;
             byte i = 0;
             do
             {
-                if (itemInfo.Spells[i].SpellID > 0 && (itemInfo.Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_TYPE.USE || itemInfo.Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_TYPE.NO_DELAY_USE) && WorldServiceLocator.WSSpells.SPELLs.ContainsKey(itemInfo.Spells[i].SpellID))
+                if (itemInfo.Spells[i].SpellID > 0 && (itemInfo.Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_TYPE.USE || itemInfo.Spells[i].SpellTrigger == ITEM_SPELLTRIGGER_TYPE.NO_DELAY_USE) && WS_Spells.SPELLs.ContainsKey(itemInfo.Spells[i].SpellID))
                 {
-                    if (itemInfo.Spells[i].SpellCharges > 0 && WorldServiceLocator.WorldServer.WORLD_ITEMs[itemGuid].ChargesLeft == 0)
+                    if (itemInfo.Spells[i].SpellCharges > 0 && worldState.WorldItems[itemGuid].ChargesLeft == 0)
                     {
-                        WorldServiceLocator.WSSpells.SendCastResult(SpellFailedReason.SPELL_FAILED_NO_CHARGES_REMAIN, ref client, itemInfo.Spells[i].SpellID);
+                        WS_Spells.SendCastResult(SpellFailedReason.SPELL_FAILED_NO_CHARGES_REMAIN, ref client, itemInfo.Spells[i].SpellID);
                         break;
                     }
                     ref var character2 = ref client.Character;
@@ -1348,30 +1376,30 @@ public class WS_Items
                     var spellID = itemInfo.Spells[i].SpellID;
                     Dictionary<ulong, ItemObject> wORLD_ITEMs;
                     ulong key;
-                    var Item = (wORLD_ITEMs = WorldServiceLocator.WorldServer.WORLD_ITEMs)[key = itemGuid];
-                    WS_Spells.CastSpellParameters castSpellParameters = new(ref targets, ref Caster, spellID, ref Item, InstantCast);
+                    var Item = (wORLD_ITEMs = worldState.WorldItems)[key = itemGuid];
+                    var castSpellParameters = castSpellParametersFactory.Create(ref targets, ref Caster, spellID, ref Item, InstantCast);
                     wORLD_ITEMs[key] = Item;
-                    reference = (WS_PlayerData.CharacterObject)Caster;
+                    reference = (CharacterObject)Caster;
                     var tmpSpell = castSpellParameters;
                     var castResult = byte.MaxValue;
                     try
                     {
-                        castResult = (byte)WorldServiceLocator.WSSpells.SPELLs[itemInfo.Spells[i].SpellID].CanCast(ref client.Character, targets, FirstCheck: true);
+                        castResult = (byte)WS_Spells.SPELLs[itemInfo.Spells[i].SpellID].CanCast(ref client.Character, targets, FirstCheck: true);
                         if (castResult == byte.MaxValue)
                         {
                             ThreadPool.QueueUserWorkItem(tmpSpell.Cast);
                         }
                         else
                         {
-                            WorldServiceLocator.WSSpells.SendCastResult((SpellFailedReason)castResult, ref client, itemInfo.Spells[i].SpellID);
+                            WS_Spells.SendCastResult((SpellFailedReason)castResult, ref client, itemInfo.Spells[i].SpellID);
                         }
                     }
                     catch (Exception ex2)
                     {
                         ProjectData.SetProjectError(ex2);
                         var e = ex2;
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Error casting spell {0}.{1}", itemInfo.Spells[i].SpellID, Environment.NewLine + e);
-                        WorldServiceLocator.WSSpells.SendCastResult((SpellFailedReason)castResult, ref client, itemInfo.Spells[i].SpellID);
+                        logger.LogDebug("Error casting spell {0}.{1}", itemInfo.Spells[i].SpellID, Environment.NewLine + e);
+                        WS_Spells.SendCastResult((SpellFailedReason)castResult, ref client, itemInfo.Spells[i].SpellID);
                         ProjectData.ClearProjectError();
                     }
                     break;
@@ -1387,7 +1415,7 @@ public class WS_Items
         {
             ProjectData.SetProjectError(ex3);
             var ex = ex3;
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Error while using a item.{0}", Environment.NewLine + ex);
+            logger.LogCritical("Error while using a item.{0}", Environment.NewLine + ex);
             ProjectData.ClearProjectError();
         }
     }
@@ -1405,28 +1433,28 @@ public class WS_Items
             bag = 0;
         }
         var slot = packet.GetInt8();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_OPEN_ITEM [bag={2} slot={3}]", client.IP, client.Port, bag, slot);
+        logger.LogDebug("[{0}:{1}] CMSG_OPEN_ITEM [bag={2} slot={3}]", client.IP, client.Port, bag, slot);
         var itemGuid = (bag != 0) ? client.Character.Items[bag].Items[slot].GUID : client.Character.Items[slot].GUID;
-        if (decimal.Compare(new decimal(itemGuid), 0m) != 0 && WorldServiceLocator.WorldServer.WORLD_ITEMs.ContainsKey(itemGuid))
+        if (decimal.Compare(new decimal(itemGuid), 0m) != 0 && worldState.WorldItems.ContainsKey(itemGuid))
         {
-            if (WorldServiceLocator.WorldServer.WORLD_ITEMs[itemGuid].GenerateLoot())
+            if (worldState.WorldItems[itemGuid].GenerateLoot())
             {
-                WorldServiceLocator.WSLoot.LootTable[itemGuid].SendLoot(ref client);
+                WS_Loot.LootTable[itemGuid].SendLoot(ref client);
             }
             else
             {
-                WorldServiceLocator.WSLoot.SendEmptyLoot(itemGuid, LootType.LOOTTYPE_CORPSE, ref client);
+                WS_Loot.SendEmptyLoot(logger, itemGuid, LootType.LOOTTYPE_CORPSE, ref client);
             }
         }
     }
 
-    public void SendInventoryChangeFailure(ref WS_PlayerData.CharacterObject objCharacter, InventoryChangeFailure errorCode, ulong guid1, ulong guid2)
+    public void SendInventoryChangeFailure(ref CharacterObject objCharacter, InventoryChangeFailure errorCode, ulong guid1, ulong guid2)
     {
         Packets.PacketClass packet = new(Opcodes.SMSG_INVENTORY_CHANGE_FAILURE);
         packet.AddInt8((byte)errorCode);
         if (errorCode == InventoryChangeFailure.EQUIP_ERR_YOU_MUST_REACH_LEVEL_N)
         {
-            packet.AddInt32(WorldServiceLocator.WorldServer.WORLD_ITEMs[guid1].ItemInfo.ReqLevel);
+            packet.AddInt32(worldState.WorldItems[guid1].ItemInfo.ReqLevel);
         }
         packet.AddUInt64(guid1);
         packet.AddUInt64(guid2);

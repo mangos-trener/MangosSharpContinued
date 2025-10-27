@@ -19,20 +19,19 @@
 using Mangos.World.AI;
 using Mangos.World.DataStores;
 using Mangos.World.Objects;
-using Microsoft.VisualBasic.CompilerServices;
 using System.Collections.Generic;
-
-namespace Mangos.World.Scripts.Creatures;
 
 public class CreatureAI_The_Plains_Vision : WS_Creatures_AI.TBaseAI
 {
+    private readonly WS_DBCDatabase database;
     protected WS_Creatures.CreatureObject aiCreature;
     private int CurrentWaypoint;
     private int NextWaypoint;
     private readonly List<WS_DBCDatabase.CreatureMovePoint> Waypoints = new();
 
-    public CreatureAI_The_Plains_Vision(ref WS_Creatures.CreatureObject Creature)
+    public CreatureAI_The_Plains_Vision(WS_DBCDatabase database, ref WS_Creatures.CreatureObject Creature)
     {
+        this.database = database;
         aiCreature = Creature;
         InitWaypoints();
     }
@@ -76,7 +75,7 @@ public class CreatureAI_The_Plains_Vision : WS_Creatures_AI.TBaseAI
             return;
         }
         // The guide has finished
-        if (Conversions.ToBoolean(aiCreature.Life.Current) || CurrentWaypoint >= Waypoints.Count)
+        if (aiCreature.Life.Current > 0 || CurrentWaypoint >= Waypoints.Count)
         {
             aiCreature.Destroy();
             return;

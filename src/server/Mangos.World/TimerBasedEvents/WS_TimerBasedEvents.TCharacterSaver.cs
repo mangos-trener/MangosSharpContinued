@@ -16,7 +16,10 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
+using Mangos.Common.Globals;
+using Mangos.World.Handlers;
+using Mangos.World.Maps;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Threading;
@@ -34,27 +37,37 @@ public partial class WS_TimerBasedEvents
         public int UPDATE_TIMER;
 
         private bool _disposedValue;
+        private readonly ILogger<TCharacterSaver> logger;
+        private readonly WorldState worldState;
+        private readonly WS_Maps maps;
+        private readonly WS_Handlers_Instance instance;
 
-        public TCharacterSaver()
+        public TCharacterSaver(ILogger<TCharacterSaver> logger, WorldState worldState, WS_Maps maps, WS_Handlers_Instance instance)
         {
             CharacterSaverTimer = null;
             CharacterSaverWorking = false;
-            UPDATE_TIMER = WorldServiceLocator.MangosConfiguration.World.SaveTimer;
+            UPDATE_TIMER = MangosGlobalConstants.SaveTimer;
             CharacterSaverTimer = new Timer(Update, null, 10000, UPDATE_TIMER);
+            this.logger = logger;
+            this.worldState = worldState;
+            this.maps = maps;
+            this.instance = instance;
         }
 
         private void Update(object state)
         {
             if (CharacterSaverWorking)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Update: Character Saver skipping update");
+                logger.LogWarning("Update: Character Saver skipping update");
                 return;
             }
+
             CharacterSaverWorking = true;
+
             try
             {
-                WorldServiceLocator.WorldServer.CHARACTERs_Lock.AcquireReaderLock(WorldServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-                foreach (var cHARACTER in WorldServiceLocator.WorldServer.CHARACTERs)
+                worldState.CharactersLock.EnterReadLock();
+                foreach (var cHARACTER in worldState.Characters)
                 {
                     cHARACTER.Value.SaveCharacter();
                 }
@@ -63,14 +76,15 @@ public partial class WS_TimerBasedEvents
             {
                 ProjectData.SetProjectError(ex2);
                 var ex = ex2;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, ex.ToString(), null);
+                logger.LogError(ex.ToString(), null);
                 ProjectData.ClearProjectError();
             }
             finally
             {
-                WorldServiceLocator.WorldServer.CHARACTERs_Lock.ReleaseReaderLock();
+                worldState.CharactersLock.ExitReadLock();
             }
-            WorldServiceLocator.WSHandlersInstance.InstanceMapUpdate();
+
+            instance.InstanceMapUpdate(maps);
             CharacterSaverWorking = false;
         }
 
@@ -81,6 +95,7 @@ public partial class WS_TimerBasedEvents
                 CharacterSaverTimer.Dispose();
                 CharacterSaverTimer = null;
             }
+
             _disposedValue = true;
         }
 

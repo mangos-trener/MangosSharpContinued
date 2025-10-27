@@ -16,9 +16,8 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
-using Mangos.World.Objects;
-using Microsoft.VisualBasic.CompilerServices;
+using Mangos.World.Objects.Factories;
+using Microsoft.Extensions.Logging;
 using System;
 
 namespace Mangos.World.Loots;
@@ -32,37 +31,46 @@ public partial class WS_Loot
         public byte ItemCount;
 
         private bool _disposedValue;
+        private readonly ILogger<LootItem> logger;
+        private readonly WorldState worldState;
+        private readonly ItemInfoFactory itemInfoFactory;
+        private readonly LootStoreItem item;
 
         public int ItemModel
         {
             get
             {
-                if (!WorldServiceLocator.WorldServer.ITEMDatabase.ContainsKey(ItemID))
+                if (!worldState.ItemDatabase.ContainsKey(ItemID))
                 {
                     try
                     {
-                        WorldServiceLocator.WorldServer.ITEMDatabase.Remove(ItemID);
-                        WS_Items.ItemInfo tmpItem = new(ItemID);
-                        WorldServiceLocator.WorldServer.ITEMDatabase.Add(ItemID, tmpItem);
+                        worldState.ItemDatabase.Remove(ItemID);
+                        var tmpItem = itemInfoFactory.Create(ItemID);
+                        worldState.ItemDatabase.Add(ItemID, tmpItem);
                     }
                     catch (Exception ex)
                     {
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Error on ItemModel [Item ID {0} : Exception {1}]", ItemID, ex);
+                        logger.LogDebug("Error on ItemModel [Item ID {0} : Exception {1}]", ItemID, ex);
                     }
                 }
-                return WorldServiceLocator.WorldServer.ITEMDatabase[ItemID].Model;
+                return worldState.ItemDatabase[ItemID].Model;
             }
         }
 
-        public LootItem(ref LootStoreItem Item)
+        public LootItem(ILogger<LootItem> logger, WorldState worldState, ItemInfoFactory itemInfoFactory, ref LootStoreItem Item)
         {
+            this.logger = logger;
             ItemID = 0;
             ItemCount = 0;
             ItemID = Item.ItemID;
             checked
             {
-                ItemCount = (byte)WorldServiceLocator.WorldServer.Rnd.Next(Item.MinCountOrRef, Item.MaxCount + 1);
+                ItemCount = (byte)WorldState.Rnd.Next(Item.MinCountOrRef, Item.MaxCount + 1);
             }
+
+            this.worldState = worldState;
+            this.itemInfoFactory = itemInfoFactory;
+            item = Item;
         }
 
         protected virtual void Dispose(bool disposing)

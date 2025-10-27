@@ -16,10 +16,11 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Map;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
 using Mangos.DataStores;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -30,17 +31,38 @@ namespace Mangos.Cluster.DataStores;
 
 public class WsDbcDatabase
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly ILogger<WsDbcDatabase> logger;
     private readonly DataStoreProvider _dataStoreProvider;
+    private readonly AccountDatabase _accountDatabase;
+    private readonly CharacterDatabase _characterDatabase;
+    private readonly WorldDatabase _worldDatabase;
 
-    public WsDbcDatabase(DataStoreProvider dataStoreProvider, ClusterServiceLocator clusterServiceLocator)
+    public WsDbcDatabase(ILogger<WsDbcDatabase> logger, DataStoreProvider dataStoreProvider, AccountDatabase accountDatabase, CharacterDatabase characterDatabase, WorldDatabase worldDatabase)
     {
+        this.logger = logger;
         _dataStoreProvider = dataStoreProvider;
-        _clusterServiceLocator = clusterServiceLocator;
+        _accountDatabase = accountDatabase;
+        _characterDatabase = characterDatabase;
+        _worldDatabase = worldDatabase;
     }
 
     private readonly string _mapDbc = "Map.dbc";
     public Dictionary<int, MapInfo> Maps = new();
+
+    public AccountDatabase GetAccountDatabase()
+    {
+        return _accountDatabase;
+    }
+
+    public CharacterDatabase GetCharacterDatabase()
+    {
+        return _characterDatabase;
+    }
+
+    public WorldDatabase GetWorldDatabase()
+    {
+        return _worldDatabase;
+    }
 
     public async Task InitializeMapsAsync()
     {
@@ -60,7 +82,7 @@ public class WsDbcDatabase
                 Maps.Add(m.Id, m);
             }
 
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "DBC: {0} Maps Initialized.", data.Rows - 1);
+            logger.LogInformation("DBC: {0} Maps Initialized.", data.Rows - 1);
         }
         catch (DirectoryNotFoundException)
         {
@@ -108,7 +130,7 @@ public class WsDbcDatabase
                 WorldSafeLocs.Add(worldSafeLoc.Id, worldSafeLoc);
             }
 
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "DBC: {0} WorldSafeLocs Initialized.", data.Rows - 1);
+            logger.LogInformation("DBC: {0} WorldSafeLocs Initialized.", data.Rows - 1);
         }
         catch (DirectoryNotFoundException)
         {
@@ -133,7 +155,7 @@ public class WsDbcDatabase
     {
         byte entry;
         DataTable mySqlQuery = new();
-        _clusterServiceLocator.WorldCluster.GetWorldDatabase().Query("SELECT * FROM battleground_template", ref mySqlQuery);
+        _worldDatabase.Query("SELECT * FROM battleground_template", ref mySqlQuery);
         foreach (DataRow row in mySqlQuery.Rows)
         {
             entry = row.As<byte>("id");
@@ -152,7 +174,7 @@ public class WsDbcDatabase
             Battlegrounds[entry].HordeStartO = row.As<float>("HordeStartO");
         }
 
-        _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "World: {0} Battlegrounds Initialized.", mySqlQuery.Rows.Count);
+        logger.LogInformation("World: {0} Battlegrounds Initialized.", mySqlQuery.Rows.Count);
     }
 
     public class Battleground
@@ -188,7 +210,7 @@ public class WsDbcDatabase
                 ChatChannelsInfo.Add(chatChannels.Index, chatChannels);
             }
 
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "DBC: {0} ChatChannels Initialized.", data.Rows - 1);
+            logger.LogInformation("DBC: {0} ChatChannels Initialized.", data.Rows - 1);
         }
         catch (DirectoryNotFoundException)
         {
@@ -230,7 +252,7 @@ public class WsDbcDatabase
                 CharRaces[(byte)raceId] = new CharRace((short)factionId, modelM, modelF, (byte)teamId, cinematicId);
             }
 
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "DBC: {0} ChrRace Loaded.", data.Rows - 1);
+            logger.LogInformation("DBC: {0} ChrRace Loaded.", data.Rows - 1);
         }
         catch (DirectoryNotFoundException)
         {
@@ -257,7 +279,7 @@ public class WsDbcDatabase
                 CharClasses[(byte)classId] = new CharClass(cinematicId);
             }
 
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.INFORMATION, "DBC: {0} ChrClasses Loaded.", dataStore.Rows - 1);
+            logger.LogInformation("DBC: {0} ChrClasses Loaded.", dataStore.Rows - 1);
         }
         catch (DirectoryNotFoundException)
         {

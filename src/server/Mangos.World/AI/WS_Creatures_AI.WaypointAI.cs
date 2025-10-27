@@ -16,9 +16,13 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
+using Mangos.Common.Globals;
 using Mangos.World.DataStores;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
 using System;
 
 namespace Mangos.World.AI;
@@ -28,12 +32,14 @@ public partial class WS_Creatures_AI
     public class WaypointAI : DefaultAI
     {
         public int CurrentWaypoint;
+        private readonly WS_DBCDatabase database;
 
-        public WaypointAI(ref WS_Creatures.CreatureObject Creature)
-            : base(ref Creature)
+        public WaypointAI(ILogger<WaypointAI> logger, WorldState worldState, ref WS_Creatures.CreatureObject creature, WS_DBCDatabase database, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat)
+            : base(logger, worldState, ref creature, maps, loot, creatures, combat)
         {
             CurrentWaypoint = -1;
             IsWaypoint = true;
+            this.database = database;
         }
 
         public override void Pause(int Time)
@@ -47,34 +53,34 @@ public partial class WS_Creatures_AI
 
         public override void DoMove()
         {
-            var distanceToSpawn = WorldServiceLocator.WSCombat.GetDistance(aiCreature.positionX, aiCreature.SpawnX, aiCreature.positionY, aiCreature.SpawnY, aiCreature.positionZ, aiCreature.SpawnZ);
+            var distanceToSpawn = WS_Combat.GetDistance(aiCreature.positionX, aiCreature.SpawnX, aiCreature.positionY, aiCreature.SpawnY, aiCreature.positionZ, aiCreature.SpawnZ);
             checked
             {
                 switch (aiTarget)
                 {
                     case null:
                         {
-                            if (WorldServiceLocator.WSDBCDatabase.CreatureMovement.ContainsKey(aiCreature.WaypointID))
+                            if (database.CreatureMovement.ContainsKey(aiCreature.WaypointID))
                             {
                                 try
                                 {
                                     CurrentWaypoint++;
-                                    if (!WorldServiceLocator.WSDBCDatabase.CreatureMovement[aiCreature.WaypointID].ContainsKey(CurrentWaypoint))
+                                    if (!database.CreatureMovement[aiCreature.WaypointID].ContainsKey(CurrentWaypoint))
                                     {
                                         CurrentWaypoint = 1;
                                     }
-                                    var MovementPoint = WorldServiceLocator.WSDBCDatabase.CreatureMovement[aiCreature.WaypointID][CurrentWaypoint];
+                                    var MovementPoint = database.CreatureMovement[aiCreature.WaypointID][CurrentWaypoint];
                                     aiTimer = aiCreature.MoveTo(MovementPoint.x, MovementPoint.y, MovementPoint.z) + MovementPoint.waittime;
                                 }
                                 catch (Exception ex)
                                 {
-                                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Creature [{0:X}] waypoints are damaged.", ex, aiCreature?.GUID - WorldServiceLocator.GlobalConstants.GUID_UNIT);
+                                    logger.LogCritical(ex, "Creature [{0:X}] waypoints are damaged.", aiCreature?.GUID - MangosGlobalConstants.GUID_UNIT);
                                     aiCreature.ResetAI();
                                 }
 
                                 break;
                             }
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Creature [{0:X}] is missing waypoints.", aiCreature?.GUID - WorldServiceLocator.GlobalConstants.GUID_UNIT);
+                            logger.LogCritical("Creature [{0:X}] is missing waypoints.", aiCreature?.GUID - MangosGlobalConstants.GUID_UNIT);
                             aiCreature.ResetAI();
                             return;
                         }

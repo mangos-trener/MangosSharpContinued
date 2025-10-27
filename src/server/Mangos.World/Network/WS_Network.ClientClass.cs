@@ -21,6 +21,7 @@ using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
 using Mangos.World.Globals;
 using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
 using System.Threading;
@@ -31,18 +32,18 @@ public partial class WS_Network
 {
     public class ClientClass : ClientInfo, IDisposable
     {
-        public WS_PlayerData.CharacterObject Character;
-        public ConcurrentQueue<Packets.PacketClass> Packets = new();
+        public CharacterObject Character;
+        public ConcurrentQueue<Packets.PacketClass> PacketsQueue = new();
         public bool DEBUG_CONNECTION;
         private Thread ProcessQueueThread;
         private readonly ManualResetEvent ProcessQueueSempahore = new(false);
         private volatile bool IsActive = true;
 
-        public ClientClass(ClientInfo ci, bool isDebug = false)
+        public ClientClass(ILogger<ClientClass> logger, ICluster cluster, WorldState worldState, ClientInfo ci, bool isDebug = false)
         {
             if (isDebug)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Creating debug connection!", null);
+                logger.LogWarning("Creating debug connection!", null);
                 DEBUG_CONNECTION = true;
             }
 
@@ -57,6 +58,11 @@ public partial class WS_Network
                 IsBackground = true
             };
             ProcessQueueThread.Start();
+            this.logger = logger;
+            this.cluster = cluster;
+            this.worldState = worldState;
+            this.ci = ci;
+            this.isDebug = isDebug;
         }
 
         public void PushPacket(Packets.PacketClass packet)
@@ -66,7 +72,7 @@ public partial class WS_Network
                 return;
             }
 
-            Packets.Enqueue(packet);
+            PacketsQueue.Enqueue(packet);
 
             lock (_sempahoreLock)
             {
@@ -82,7 +88,7 @@ public partial class WS_Network
             {
                 while (IsActive)
                 {
-                    if (Packets.IsEmpty)
+                    if (PacketsQueue.IsEmpty)
                     {
                         ProcessQueueSempahore.WaitOne();
 
@@ -97,31 +103,31 @@ public partial class WS_Network
                         }
                     }
 
-                    while (Packets.TryDequeue(out var packet))
+                    while (PacketsQueue.TryDequeue(out var packet))
                     {
                         var tempPacket = packet;
 
                         using (tempPacket)
                         {
-                            if (!WorldServiceLocator.WorldServer.PacketHandlers.ContainsKey(tempPacket.OpCode))
+                            if (!WorldServer.PacketHandlers.ContainsKey(tempPacket.OpCode))
                             {
-                                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, $"[{IP}:{Port}] Unknown Opcode 0x{(int)tempPacket.OpCode:X2} [DataLen={tempPacket.Data.Length} {tempPacket.OpCode}]");
+                                logger.LogWarning($"[{IP}:{Port}] Unknown Opcode 0x{(int)tempPacket.OpCode:X2} [DataLen={tempPacket.Data.Length} {tempPacket.OpCode}]");
                                 DumpPacket(tempPacket);
                             }
                             else
                             {
-                                var start = WorldServiceLocator.NativeMethods.timeGetTime("");
+                                var start = LegacyNativeMethods.TimeGetTime("");
                                 checked
                                 {
                                     try
                                     {
-                                        var handlePacket = WorldServiceLocator.WorldServer.PacketHandlers[tempPacket.OpCode];
+                                        var handlePacket = WorldServer.PacketHandlers[tempPacket.OpCode];
                                         var client = this;
                                         handlePacket(ref packet, ref client);
 
-                                        if (WorldServiceLocator.NativeMethods.timeGetTime("") - start > 100)
+                                        if (LegacyNativeMethods.TimeGetTime("") - start > 100)
                                         {
-                                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Packet processing took too long: {0}, {1}ms", tempPacket.OpCode, WorldServiceLocator.NativeMethods.timeGetTime("") - start);
+                                            logger.LogWarning("Packet processing took too long: {0}, {1}ms", tempPacket.OpCode, LegacyNativeMethods.TimeGetTime("") - start);
                                         }
                                     }
                                     catch (Exception ex3)
@@ -146,6 +152,11 @@ public partial class WS_Network
         }
 
         private readonly object lockObj = new();
+        private readonly ILogger<ClientClass> logger;
+        private ICluster cluster;
+        private readonly WorldState worldState;
+        private readonly ClientInfo ci;
+        private readonly bool isDebug;
 
         public void Send(ref byte[] data)
         {
@@ -153,7 +164,7 @@ public partial class WS_Network
             {
                 try
                 {
-                    WorldServiceLocator.WorldServer.ClsWorldServer.Cluster.ClientSend(Index, data);
+                    cluster.ClientSend(Index, data);
                 }
                 catch (Exception ex)
                 {
@@ -164,7 +175,7 @@ public partial class WS_Network
                         return;
                     }
 
-                    WorldServiceLocator.WorldServer.ClsWorldServer.Cluster = null;
+                    cluster = null;
                     Delete();
                 }
             }
@@ -184,7 +195,7 @@ public partial class WS_Network
                         }
                         packet.UpdateLength();
 
-                        WorldServiceLocator.WorldServer.ClsWorldServer.Cluster?.ClientSend(Index, packet.Data);
+                        cluster?.ClientSend(Index, packet.Data);
                     }
                 }
                 catch (Exception ex)
@@ -196,7 +207,7 @@ public partial class WS_Network
                         return;
                     }
 
-                    WorldServiceLocator.WorldServer.ClsWorldServer.Cluster = null;
+                    cluster = null;
                     Delete();
                 }
             }
@@ -215,7 +226,7 @@ public partial class WS_Network
                     packet.UpdateLength();
                     var data = (byte[])packet.Data.Clone();
 
-                    WorldServiceLocator.WorldServer.ClsWorldServer.Cluster?.ClientSend(Index, data);
+                    cluster?.ClientSend(Index, data);
                 }
                 catch (Exception ex)
                 {
@@ -226,7 +237,7 @@ public partial class WS_Network
                         return;
                     }
 
-                    WorldServiceLocator.WorldServer.ClsWorldServer.Cluster = null;
+                    cluster = null;
                     Delete();
                 }
             }
@@ -251,33 +262,30 @@ public partial class WS_Network
 
         private void SetError(Exception ex, string message, LogType logType)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(logType, message, ex);
+            logger.Log(LogLevel.Error, message, ex);
         }
 
         private void DumpPacket(Packets.PacketClass packet)
         {
             if (packet == null)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Unable to dump packet");
+                logger.LogWarning("Unable to dump packet");
                 return;
             }
 
             try
             {
-                var packets4 = WorldServiceLocator.Packets;
-                var data4 = packet.Data;
-                var client = this;
-                packets4.DumpPacket(data4, client);
+                Packets.DumpPacket(logger, packet.Data, this, 0);
             }
             catch (Exception ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Unable to dump packet", ex);
+                logger.LogWarning("Unable to dump packet", ex);
             }
         }
 
         public void Dispose()
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, $"Connection from [{IP}:{Port}] disposed.");
+            logger.LogInformation($"Connection from [{IP}:{Port}] disposed.");
 
             IsActive = false;
             ProcessQueueSempahore.Set(); //Allow thread to exit.
@@ -290,24 +298,24 @@ public partial class WS_Network
             }
             catch (ThreadInterruptedException ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "{0} Thread ID: {1}", ex, Thread.CurrentThread.ManagedThreadId);
+                logger.LogWarning("{0} Thread ID: {1}", ex, Thread.CurrentThread.ManagedThreadId);
             }
             ProcessQueueThread = null;
 
-            Packets?.Clear();
+            PacketsQueue?.Clear();
 
             try
             {
-                if (WorldServiceLocator.WorldServer.CLIENTs.ContainsKey(Index))
+                if (worldState.ConnectedClients.ContainsKey(Index))
                 {
-                    WorldServiceLocator.WorldServer.CLIENTs.Remove(Index);
+                    worldState.ConnectedClients.Remove(Index);
                 }
 
-                WorldServiceLocator.WorldServer.ClsWorldServer.Cluster?.ClientDrop(Index);
+                cluster?.ClientDrop(Index);
 
-                if (WorldServiceLocator.WorldServer.CLIENTs.ContainsKey(Index))
+                if (worldState.ConnectedClients.ContainsKey(Index))
                 {
-                    WorldServiceLocator.WorldServer.CLIENTs.Remove(Index);
+                    worldState.ConnectedClients.Remove(Index);
                 }
 
                 if (Character != null)
@@ -319,7 +327,7 @@ public partial class WS_Network
             }
             catch (Exception ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, $"Connection from [{IP}:{Port}] was not properly disposed.", ex);
+                logger.LogError($"Connection from [{IP}:{Port}] was not properly disposed.", ex);
             }
         }
     }

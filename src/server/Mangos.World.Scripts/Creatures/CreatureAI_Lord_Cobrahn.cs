@@ -19,8 +19,13 @@
 using Mangos.Common.Enums.Chat;
 using Mangos.Common.Enums.Misc;
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
 using System;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 namespace Mangos.World.Scripts.Creatures;
 
@@ -42,7 +47,8 @@ public class CreatureAI_Lord_Cobrahn : WS_Creatures_AI.BossAI
     public int NextSlumber;
     public int NextHealingTouch;
 
-    public CreatureAI_Lord_Cobrahn(ref WS_Creatures.CreatureObject Creature) : base(ref Creature)
+    public CreatureAI_Lord_Cobrahn(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature)
     {
         AllowedMove = false;
         Creature.Flying = false;

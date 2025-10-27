@@ -366,7 +366,7 @@ public partial class Packets
                     Offset++;
                 }
                 Offset++;
-                return WorldServiceLocator.Functions.EscapeString(Encoding.UTF8.GetString(Data, start, i));
+                return Globals.Functions.EscapeString(Encoding.UTF8.GetString(Data, start, i));
             }
         }
 
@@ -377,7 +377,7 @@ public partial class Packets
             {
                 var start = Offset + 1;
                 Offset += thisLength + 1;
-                return WorldServiceLocator.Functions.EscapeString(Encoding.UTF8.GetString(Data, start, thisLength));
+                return Globals.Functions.EscapeString(Encoding.UTF8.GetString(Data, start, thisLength));
             }
         }
 

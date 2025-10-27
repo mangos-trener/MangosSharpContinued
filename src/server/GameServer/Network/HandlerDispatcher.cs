@@ -34,8 +34,8 @@ internal sealed class HandlerDispatcher<TRequest, THandler> : IHandlerDispatcher
 
     public Opcodes Opcode => TRequest.Opcode;
 
-    public Task<HandlerResult> ExectueAsync(PacketReader reader)
+    public Task<HandlerResult> ExecuteAsync(PacketReader reader)
     {
-        return handler.ExectueAsync(TRequest.Read(reader));
+        return handler.ExecuteAsync(TRequest.Read(reader));
     }
 }

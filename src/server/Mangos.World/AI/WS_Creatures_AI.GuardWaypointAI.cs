@@ -16,9 +16,13 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
+using Mangos.Common.Globals;
 using Mangos.World.DataStores;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
 using System;
 
 namespace Mangos.World.AI;
@@ -28,9 +32,10 @@ public partial class WS_Creatures_AI
     public class GuardWaypointAI : GuardAI
     {
         public int CurrentWaypoint;
+        private readonly WS_DBCDatabase database;
 
-        public GuardWaypointAI(ref WS_Creatures.CreatureObject Creature)
-            : base(ref Creature)
+        public GuardWaypointAI(ILogger<GuardWaypointAI> logger, WorldState worldState, ref WS_Creatures.CreatureObject Creature, WS_DBCDatabase database, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat)
+            : base(logger, worldState, ref Creature, maps, loot, creatures, combat)
         {
             if (Creature is null)
             {
@@ -40,6 +45,7 @@ public partial class WS_Creatures_AI
             CurrentWaypoint = -1;
             AllowedMove = true;
             IsWaypoint = true;
+            this.database = database;
         }
 
         public override void Pause(int Time)
@@ -53,33 +59,33 @@ public partial class WS_Creatures_AI
 
         public override void DoMove()
         {
-            var distanceToSpawn = WorldServiceLocator.WSCombat.GetDistance(aiCreature.positionX, aiCreature.SpawnX, aiCreature.positionY, aiCreature.SpawnY, aiCreature.positionZ, aiCreature.SpawnZ);
+            var distanceToSpawn = WS_Combat.GetDistance(aiCreature.positionX, aiCreature.SpawnX, aiCreature.positionY, aiCreature.SpawnY, aiCreature.positionZ, aiCreature.SpawnZ);
             checked
             {
                 switch (aiTarget)
                 {
                     case null:
                         {
-                            if (WorldServiceLocator.WSDBCDatabase.CreatureMovement.ContainsKey(aiCreature.WaypointID))
+                            if (database.CreatureMovement.ContainsKey(aiCreature.WaypointID))
                             {
                                 try
                                 {
                                     CurrentWaypoint++;
-                                    if (!WorldServiceLocator.WSDBCDatabase.CreatureMovement[aiCreature.WaypointID].ContainsKey(CurrentWaypoint))
+                                    if (!database.CreatureMovement[aiCreature.WaypointID].ContainsKey(CurrentWaypoint))
                                     {
                                         CurrentWaypoint = 1;
                                     }
-                                    var MovementPoint = WorldServiceLocator.WSDBCDatabase.CreatureMovement[aiCreature.WaypointID][CurrentWaypoint];
+                                    var MovementPoint = database.CreatureMovement[aiCreature.WaypointID][CurrentWaypoint];
                                     aiTimer = aiCreature.MoveTo(MovementPoint.x, MovementPoint.y, MovementPoint.z) + MovementPoint.waittime;
                                 }
                                 catch (Exception ex)
                                 {
-                                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Creature [{0:X}] waypoints are damaged. {1}", aiCreature?.GUID - WorldServiceLocator.GlobalConstants.GUID_UNIT, ex.Message);
+                                    logger.LogCritical("Creature [{0:X}] waypoints are damaged. {1}", aiCreature?.GUID - MangosGlobalConstants.GUID_UNIT, ex.Message);
                                     aiCreature.ResetAI();
                                 }
                                 break;
                             }
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Creature [{0:X}] is missing waypoints.", aiCreature?.GUID - WorldServiceLocator.GlobalConstants.GUID_UNIT);
+                            logger.LogCritical("Creature [{0:X}] is missing waypoints.", aiCreature?.GUID - MangosGlobalConstants.GUID_UNIT);
                             aiCreature.ResetAI();
                             return;
                         }

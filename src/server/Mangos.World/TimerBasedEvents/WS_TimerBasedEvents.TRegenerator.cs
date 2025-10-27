@@ -18,6 +18,9 @@
 
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Player;
+using Mangos.World.Objects;
+using Mangos.World.Spells;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Threading;
@@ -49,22 +52,33 @@ public partial class WS_TimerBasedEvents
         public const int REGENERATION_ENERGY = 20;
 
         public const int REGENERATION_RAGE = 25;
-
+        private readonly ILogger<TRegenerator> logger;
+        private readonly WorldState worldState;
+        private readonly WS_Spells spells;
+        private readonly WS_GameObjects gameObjects;
         private bool _disposedValue;
 
-        public TRegenerator()
+        public TRegenerator(
+            ILogger<TRegenerator> logger,
+            WorldState worldState,
+            WS_Spells spells,
+            WS_GameObjects gameObjects)
         {
             RegenerationTimer = null;
             RegenerationWorking = false;
             NextGroupUpdate = true;
             RegenerationTimer = new Timer(Regenerate, null, 10000, 2000);
+            this.logger = logger;
+            this.worldState = worldState;
+            this.spells = spells;
+            this.gameObjects = gameObjects;
         }
 
         private void Regenerate(object state)
         {
             if (RegenerationWorking)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Update: Regenerator skipping update");
+                logger.LogWarning("Update: Regenerator skipping update");
                 return;
             }
             RegenerationWorking = true;
@@ -73,8 +87,8 @@ public partial class WS_TimerBasedEvents
             {
                 try
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs_Lock.AcquireReaderLock(WorldServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-                    foreach (var Character in WorldServiceLocator.WorldServer.CHARACTERs)
+                    worldState.CharactersLock.EnterReadLock();
+                    foreach (var Character in worldState.Characters)
                     {
                         if (Character.Value.DEAD || Character.Value.underWaterTimer != null || Character.Value.LogoutTimer != null || Character.Value.client == null)
                         {
@@ -211,7 +225,7 @@ public partial class WS_TimerBasedEvents
                             value.DuelOutOfBounds -= 2;
                             if (value.DuelOutOfBounds == 0)
                             {
-                                WorldServiceLocator.WSSpells.DuelComplete(ref value.DuelPartner, ref value.client.Character);
+                                WS_Spells.DuelComplete(worldState, gameObjects, ref value.DuelPartner, ref value.client.Character);
                             }
                         }
                         value.CheckCombat();
@@ -225,16 +239,16 @@ public partial class WS_TimerBasedEvents
                         }
                         value = null;
                     }
-                    if (WorldServiceLocator.WorldServer.CHARACTERs_Lock.IsReaderLockHeld)
+                    if (worldState.CharactersLock.IsReadLockHeld)
                     {
-                        WorldServiceLocator.WorldServer.CHARACTERs_Lock.ReleaseReaderLock();
+                        worldState.CharactersLock.ExitReadLock();
                     }
                 }
                 catch (Exception ex2)
                 {
                     ProjectData.SetProjectError(ex2);
                     var ex = ex2;
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Error at regenerate.{0}", Environment.NewLine + ex);
+                    logger.LogWarning("Error at regenerate.{0}", Environment.NewLine + ex);
                     ProjectData.ClearProjectError();
                 }
                 RegenerationWorking = false;

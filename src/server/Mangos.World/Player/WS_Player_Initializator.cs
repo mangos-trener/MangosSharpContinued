@@ -20,7 +20,6 @@ using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Player;
 using Mangos.World.DataStores;
 using System;
-using System.Collections.Generic;
 
 namespace Mangos.World.Player;
 
@@ -29,14 +28,27 @@ public class WS_Player_Initializator
     public int DEFAULT_MAX_LEVEL;
 
     public int[] XPTable;
+    private readonly WS_DBCDatabase database;
 
-    public WS_Player_Initializator()
+    public WS_Player_Initializator(WS_DBCDatabase database)
     {
         DEFAULT_MAX_LEVEL = 60;
         XPTable = new int[checked(DEFAULT_MAX_LEVEL + 1)];
+        this.database = database;
+
+        InitializeXpTable();
     }
 
-    public int CalculateStartingLIFE(ref WS_PlayerData.CharacterObject objCharacter, int baseLIFE)
+    public void InitializeXpTable()
+    {
+        var xpData = database.GetXpTable();
+        foreach (var kvp in xpData)
+        {
+            XPTable[kvp.Key] = kvp.Value;
+        }
+    }
+
+    public int CalculateStartingLIFE(ref CharacterObject objCharacter, int baseLIFE)
     {
         checked
         {
@@ -46,7 +58,7 @@ public class WS_Player_Initializator
         }
     }
 
-    public int CalculateStartingMANA(ref WS_PlayerData.CharacterObject objCharacter, int baseMANA)
+    public int CalculateStartingMANA(ref CharacterObject objCharacter, int baseMANA)
     {
         checked
         {
@@ -61,7 +73,7 @@ public class WS_Player_Initializator
         return checked((int)Math.Round((a3 * level * level * level) + (a2 * level * level) + (a1 * level) + a0) - (int)Math.Round((a3 * (level - 1) * (level - 1) * (level - 1)) + (a2 * (level - 1) * (level - 1)) + (a1 * (level - 1)) + a0));
     }
 
-    public void CalculateOnLevelUP(ref WS_PlayerData.CharacterObject objCharacter)
+    public void CalculateOnLevelUP(ref CharacterObject objCharacter)
     {
         var baseInt = objCharacter.Intellect.Base;
         var baseSpi = objCharacter.Spirit.Base;
@@ -297,7 +309,7 @@ public class WS_Player_Initializator
             }
             foreach (var Skill in objCharacter.Skills)
             {
-                if (WorldServiceLocator.WSDBCDatabase.SkillLines[Skill.Key] == 6)
+                if (database.SkillLines[Skill.Key] == 6)
                 {
                     Skill.Value.Base += 5;
                 }
@@ -316,7 +328,7 @@ public class WS_Player_Initializator
         };
     }
 
-    public void InitializeReputations(ref WS_PlayerData.CharacterObject objCharacter)
+    public void InitializeReputations(ref CharacterObject objCharacter)
     {
         byte i = 0;
         do
@@ -328,7 +340,7 @@ public class WS_Player_Initializator
             };
             checked
             {
-                foreach (var tmpFactionInfo in WorldServiceLocator.WSDBCDatabase.FactionInfo)
+                foreach (var tmpFactionInfo in database.FactionInfo)
                 {
                     if (tmpFactionInfo.Value.VisibleID != i)
                     {
@@ -337,7 +349,7 @@ public class WS_Player_Initializator
                     byte j = 0;
                     do
                     {
-                        if (WorldServiceLocator.Functions.HaveFlag((uint)tmpFactionInfo.Value.flags[j], (byte)((int)objCharacter.Race - 1)))
+                        if (Globals.Functions.HaveFlag((uint)tmpFactionInfo.Value.flags[j], (byte)((int)objCharacter.Race - 1)))
                         {
                             objCharacter.Reputation[i].Flags = tmpFactionInfo.Value.rep_flags[j];
                             objCharacter.Reputation[i].Value = tmpFactionInfo.Value.rep_stats[j];

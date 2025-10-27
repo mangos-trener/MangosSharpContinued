@@ -19,7 +19,12 @@
 using Mangos.Common.Enums.Chat;
 using Mangos.Common.Enums.Misc;
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 // Example AI for combat.
 // TODO: Fix AoE spells on AIs and then insert it as an example into this.
@@ -35,7 +40,8 @@ public class CreatureAI : WS_Creatures_AI.BossAI
     public int NextKnockdown; // This will be called later, this is only needed along with the CD if you plan to have it recasted.
     public int CurrentWaypoint;
 
-    public CreatureAI(ref WS_Creatures.CreatureObject Creature) : base(ref Creature) // The following under this are very self explanatory, on spawn the creature will not move by itself nor fly. It will be visible from far away. This can be changed.
+    public CreatureAI(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature) // The following under this are very self explanatory, on spawn the creature will not move by itself nor fly. It will be visible from far away. This can be changed.
     {
         AllowedMove = false;
         Creature.Flying = false;

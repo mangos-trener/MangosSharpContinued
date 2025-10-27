@@ -19,8 +19,12 @@
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Misc;
 using Mangos.Common.Enums.Player;
+using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
-using Mangos.World.Objects;
+using Mangos.Common.Legacy.Databases;
+using Mangos.World.DataStores;
+using Mangos.World.Objects.Factories;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections;
@@ -31,30 +35,58 @@ namespace Mangos.World.Player;
 
 public class WS_Player_Creation
 {
-    public int CreateCharacter(string Account, string Name, byte Race, byte Classe, byte Gender, byte Skin, byte Face, byte HairStyle, byte HairColor, byte FacialHair, byte OutfitID)
+    private readonly ILogger<WS_Player_Creation> logger;
+    private readonly WorldState worldState;
+    private readonly WS_DBCDatabase database;
+    private readonly WorldDatabase worldDatabase;
+    private readonly CharacterDatabase characterDatabase;
+    private readonly AccountDatabase accountDatabase;
+    private readonly WS_Player_Initializator playerInitializator;
+    private readonly ItemInfoFactory itemInfoFactory;
+    private readonly CharacterObjectFactory characterObjectFactory;
+
+    public WS_Player_Creation(ILogger<WS_Player_Creation> logger, WorldState worldState, WS_DBCDatabase database, WorldDatabase worldDatabase, CharacterDatabase characterDatabase, AccountDatabase accountDatabase, WS_Player_Initializator playerInitializator, ItemInfoFactory itemInfoFactory, CharacterObjectFactory characterObjectFactory)
     {
-        WS_PlayerData.CharacterObject Character = new();
+        this.logger = logger;
+        this.worldState = worldState;
+        this.database = database;
+        this.worldDatabase = worldDatabase;
+        this.characterDatabase = characterDatabase;
+        this.accountDatabase = accountDatabase;
+        this.playerInitializator = playerInitializator;
+        this.itemInfoFactory = itemInfoFactory;
+        this.characterObjectFactory = characterObjectFactory;
+    }
+
+    public int CreateCharacter(string account, string name, byte race, byte characterClass, byte gender, byte skin, byte face, byte hairStyle, byte hairColor, byte facialHair, byte outfitID)
+    {
         DataTable MySQLQuery = new();
-        Character.Name = WorldServiceLocator.Functions.CapitalizeName(ref Name);
-        Character.Race = (Races)Race;
-        Character.Classe = (Classes)Classe;
-        Character.Gender = (Genders)Gender;
-        Character.Skin = Skin;
-        Character.Face = Face;
-        Character.HairStyle = HairStyle;
-        Character.HairColor = HairColor;
-        Character.FacialHair = FacialHair;
-        WorldServiceLocator.WorldServer.AccountDatabase.Query($"SELECT id, gmlevel FROM account WHERE username = \"{Account}\";", ref MySQLQuery);
+
+        var character = characterObjectFactory.Create();
+
+        character.Name = Globals.Functions.CapitalizeName(ref name);
+        character.Race = (Races)race;
+        character.Classe = (Classes)characterClass;
+        character.Gender = (Genders)gender;
+        character.Skin = skin;
+        character.Face = face;
+        character.HairStyle = hairStyle;
+        character.HairColor = hairColor;
+        character.FacialHair = facialHair;
+
+        accountDatabase.Query($"SELECT id, gmlevel FROM account WHERE username = \"{account}\";", ref MySQLQuery);
+
         var Account_ID = MySQLQuery.Rows[0].As<int>("id");
-        var Account_Access = Character.Access = (AccessLevel)MySQLQuery.Rows[0].As<byte>("gmlevel");
-        if (!WorldServiceLocator.Functions.ValidateName(Character.Name))
+        var Account_Access = character.Access = (AccessLevel)MySQLQuery.Rows[0].As<byte>("gmlevel");
+        if (!Globals.Functions.ValidateName(character.Name))
         {
             return 70;
         }
+
         try
         {
             MySQLQuery.Clear();
-            WorldServiceLocator.WorldServer.CharacterDatabase.Query($"SELECT char_name FROM characters WHERE char_name = \"{Character.Name}\";", ref MySQLQuery);
+            characterDatabase.Query($"SELECT char_name FROM characters WHERE char_name = \"{character.Name}\";", ref MySQLQuery);
             if (MySQLQuery.Rows.Count > 0)
             {
                 return 49;
@@ -67,90 +99,106 @@ public class WS_Player_Creation
             ProjectData.ClearProjectError();
             return CreateCharacter;
         }
+
         checked
         {
-            if (WorldServiceLocator.GlobalConstants.SERVER_CONFIG_DISABLED_CLASSES[(int)Character.Classe - 1] || (WorldServiceLocator.GlobalConstants.SERVER_CONFIG_DISABLED_RACES[(int)Character.Race - 1] && Account_Access < AccessLevel.GameMaster))
+            if (MangosGlobalConstants.SERVER_CONFIG_DISABLED_CLASSES[(int)character.Classe - 1]
+                || (MangosGlobalConstants.SERVER_CONFIG_DISABLED_RACES[(int)character.Race - 1]
+                && Account_Access < AccessLevel.GameMaster))
             {
                 return 50;
             }
+
             if (Account_Access <= AccessLevel.Player)
             {
                 MySQLQuery.Clear();
-                WorldServiceLocator.WorldServer.CharacterDatabase.Query($"SELECT char_race FROM characters WHERE account_id = \"{Account_ID}\" LIMIT 1;", ref MySQLQuery);
-                if (MySQLQuery.Rows.Count > 0 && Character.IsHorde != WorldServiceLocator.Functions.GetCharacterSide(MySQLQuery.Rows[0].As<byte>("char_race")))
+                characterDatabase.Query($"SELECT char_race FROM characters WHERE account_id = \"{Account_ID}\" LIMIT 1;", ref MySQLQuery);
+                if (MySQLQuery.Rows.Count > 0 && character.IsHorde != Globals.Functions.GetCharacterSide(MySQLQuery.Rows[0].As<byte>("char_race")))
                 {
                     return 51;
                 }
             }
+
             MySQLQuery.Clear();
-            WorldServiceLocator.WorldServer.CharacterDatabase.Query($"SELECT char_name FROM characters WHERE account_id = \"{Account_ID}\";", ref MySQLQuery);
+
+            characterDatabase.Query($"SELECT char_name FROM characters WHERE account_id = \"{Account_ID}\";", ref MySQLQuery);
             if (MySQLQuery.Rows.Count >= 10)
             {
                 return 52;
             }
+
             MySQLQuery.Clear();
-            WorldServiceLocator.WorldServer.CharacterDatabase.Query($"SELECT char_name FROM characters WHERE account_id = \"{Account_ID}\";", ref MySQLQuery);
+
+            characterDatabase.Query($"SELECT char_name FROM characters WHERE account_id = \"{Account_ID}\";", ref MySQLQuery);
             if (MySQLQuery.Rows.Count >= 10)
             {
                 return 53;
             }
+
             try
             {
-                WorldServiceLocator.WSPlayerInitializator.InitializeReputations(ref Character);
-                CreateCharacter(ref Character);
-                Character.SaveAsNewCharacter(Account_ID);
-                CreateCharacterSpells(ref Character);
-                CreateCharacterItems(ref Character);
+                playerInitializator.InitializeReputations(ref character);
+                CreateCharacter(ref character);
+                character.SaveAsNewCharacter(Account_ID);
+                CreateCharacterSpells(ref character);
+                CreateCharacterItems(ref character);
             }
             catch (Exception ex)
             {
                 ProjectData.SetProjectError(ex);
                 var err = ex;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Error initializing character! {0} {1}", Environment.NewLine, err.ToString());
+                logger.LogError("Error initializing character! {0} {1}", Environment.NewLine, err.ToString());
                 var CreateCharacter = 48;
                 ProjectData.ClearProjectError();
                 return CreateCharacter;
             }
             finally
             {
-                Character.Dispose();
+                character.Dispose();
             }
+
             return 46;
         }
     }
 
-    public void CreateCharacter(ref WS_PlayerData.CharacterObject objCharacter)
+    public void CreateCharacter(ref CharacterObject objCharacter)
     {
         DataTable CreateInfo = new();
         DataTable CreateInfoBars = new();
         DataTable CreateInfoSkills = new();
         DataTable LevelStats = new();
         DataTable ClassLevelStats = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM playercreateinfo WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfo);
+
+        worldDatabase.Query($"SELECT * FROM playercreateinfo WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfo);
         if (CreateInfo.Rows.Count <= 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "No information found in playercreateinfo table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
+            logger.LogError("No information found in playercreateinfo table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
         }
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM playercreateinfo_action WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe} ORDER BY button;", ref CreateInfoBars);
+
+        worldDatabase.Query($"SELECT * FROM playercreateinfo_action WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe} ORDER BY button;", ref CreateInfoBars);
         if (CreateInfoBars.Rows.Count <= 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "No information found in playercreateinfo_action table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
+            logger.LogError("No information found in playercreateinfo_action table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
         }
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM playercreateinfo_skill WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfoSkills);
+
+        worldDatabase.Query($"SELECT * FROM playercreateinfo_skill WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfoSkills);
         if (CreateInfoSkills.Rows.Count <= 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "No information found in playercreateinfo_skill table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
+            logger.LogError("No information found in playercreateinfo_skill table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
         }
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM player_levelstats WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe} AND level = {objCharacter.Level};", ref LevelStats);
+
+        worldDatabase.Query($"SELECT * FROM player_levelstats WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe} AND level = {objCharacter.Level};", ref LevelStats);
         if (LevelStats.Rows.Count <= 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "No information found in player_levelstats table for Race: {0}, Class: {1}, Level: {2}", objCharacter.Race, objCharacter.Classe, objCharacter.Level);
+            logger.LogError("No information found in player_levelstats table for Race: {0}, Class: {1}, Level: {2}", objCharacter.Race, objCharacter.Classe, objCharacter.Level);
         }
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM player_classlevelstats WHERE class = {(int)objCharacter.Classe} AND level = {objCharacter.Level};", ref ClassLevelStats);
+
+        worldDatabase.Query($"SELECT * FROM player_classlevelstats WHERE class = {(int)objCharacter.Classe} AND level = {objCharacter.Level};", ref ClassLevelStats);
         if (ClassLevelStats.Rows.Count <= 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "No information found in player_classlevelstats table for Class: {0}, Level: {1}", objCharacter.Classe, objCharacter.Level);
+            logger.LogError("No information found in player_classlevelstats table for Class: {0}, Level: {1}", objCharacter.Classe, objCharacter.Level);
         }
+
         objCharacter.Copper = 0u;
         objCharacter.XP = 0;
         objCharacter.Size = 1f;
@@ -162,15 +210,16 @@ public class WS_Player_Creation
         objCharacter.Rage.Base = 0;
         objCharacter.Energy.Current = 0;
         objCharacter.Energy.Base = 0;
-        objCharacter.ManaType = WorldServiceLocator.WSPlayerInitializator.GetClassManaType(objCharacter.Classe);
-        objCharacter.Model = WorldServiceLocator.Functions.GetRaceModel(objCharacter.Race, (int)objCharacter.Gender);
-        objCharacter.Faction = WorldServiceLocator.WSDBCDatabase.CharRaces[(int)objCharacter.Race].FactionID;
+        objCharacter.ManaType = playerInitializator.GetClassManaType(objCharacter.Classe);
+        objCharacter.Model = Globals.Functions.GetRaceModel(objCharacter.Race, (int)objCharacter.Gender);
+        objCharacter.Faction = database.CharRaces[(int)objCharacter.Race].FactionID;
         objCharacter.MapID = Conversions.ToUInteger(CreateInfo.Rows[0]["map"]);
         objCharacter.ZoneID = Conversions.ToInteger(CreateInfo.Rows[0]["zone"]);
         objCharacter.positionX = Conversions.ToSingle(CreateInfo.Rows[0]["position_x"]);
         objCharacter.positionY = Conversions.ToSingle(CreateInfo.Rows[0]["position_y"]);
         objCharacter.positionZ = Conversions.ToSingle(CreateInfo.Rows[0]["position_z"]);
         objCharacter.orientation = Conversions.ToSingle(CreateInfo.Rows[0]["orientation"]);
+
         checked
         {
             objCharacter.bindpoint_map_id = (int)objCharacter.MapID;
@@ -185,6 +234,7 @@ public class WS_Player_Creation
             objCharacter.Spirit.Base = Conversions.ToInteger(LevelStats.Rows[0]["spi"]);
             objCharacter.Life.Base = Conversions.ToInteger(ClassLevelStats.Rows[0]["basehp"]);
             objCharacter.Life.Current = objCharacter.Life.Maximum;
+
             switch (objCharacter.ManaType)
             {
                 case ManaTypes.TYPE_MANA:
@@ -202,8 +252,10 @@ public class WS_Player_Creation
                     objCharacter.Energy.Current = 0;
                     break;
             }
+
             objCharacter.Damage.Minimum = 5f;
             objCharacter.Damage.Maximum = 10f;
+
             IEnumerator enumerator = default;
             try
             {
@@ -221,16 +273,18 @@ public class WS_Player_Creation
                     (enumerator as IDisposable).Dispose();
                 }
             }
+
             var i = 0;
             do
             {
-                if ((WorldServiceLocator.WSDBCDatabase.CharRaces[(int)objCharacter.Race].TaxiMask & (1 << i)) != 0)
+                if ((database.CharRaces[(int)objCharacter.Race].TaxiMask & (1 << i)) != 0)
                 {
                     objCharacter.TaxiZones.Set(i + 1, value: true);
                 }
                 i++;
             }
             while (i <= 31);
+
             IEnumerator enumerator2 = default;
             try
             {
@@ -255,13 +309,13 @@ public class WS_Player_Creation
         }
     }
 
-    public void CreateCharacterSpells(ref WS_PlayerData.CharacterObject objCharacter)
+    public void CreateCharacterSpells(ref CharacterObject objCharacter)
     {
         DataTable CreateInfoSpells = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM playercreateinfo_spell WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfoSpells);
+        worldDatabase.Query($"SELECT * FROM playercreateinfo_spell WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfoSpells);
         if (CreateInfoSpells.Rows.Count <= 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "No information found in playercreateinfo_spell table Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
+            logger.LogError("No information found in playercreateinfo_spell table Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
         }
         IEnumerator enumerator = default;
         try
@@ -282,13 +336,13 @@ public class WS_Player_Creation
         }
     }
 
-    public void CreateCharacterItems(ref WS_PlayerData.CharacterObject objCharacter)
+    public void CreateCharacterItems(ref CharacterObject objCharacter)
     {
         DataTable CreateInfoItems = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM playercreateinfo_item WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfoItems);
+        worldDatabase.Query($"SELECT * FROM playercreateinfo_item WHERE race = {(int)objCharacter.Race} AND class = {(int)objCharacter.Classe};", ref CreateInfoItems);
         if (CreateInfoItems.Rows.Count <= 0)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "No information found in playercreateinfo_item table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
+            logger.LogError("No information found in playercreateinfo_item table for Race: {0}, Class: {1}", objCharacter.Race, objCharacter.Classe);
         }
         Dictionary<int, int> Items = new();
         List<int> Used = new();
@@ -311,15 +365,15 @@ public class WS_Player_Creation
         }
         foreach (var Item2 in Items)
         {
-            if (!WorldServiceLocator.WorldServer.ITEMDatabase.ContainsKey(Item2.Key))
+            if (!worldState.ItemDatabase.ContainsKey(Item2.Key))
             {
-                WS_Items.ItemInfo newItem = new(Item2.Key);
+                var newItem = itemInfoFactory.Create(Item2.Key);
             }
-            if (WorldServiceLocator.WorldServer.ITEMDatabase[Item2.Key].ContainerSlots <= 0)
+            if (worldState.ItemDatabase[Item2.Key].ContainerSlots <= 0)
             {
                 continue;
             }
-            var Slots2 = WorldServiceLocator.WorldServer.ITEMDatabase[Item2.Key].GetSlots;
+            var Slots2 = worldState.ItemDatabase[Item2.Key].GetSlots;
             var array = Slots2;
             foreach (var tmpSlot2 in array)
             {
@@ -337,7 +391,7 @@ public class WS_Player_Creation
             {
                 continue;
             }
-            var Slots = WorldServiceLocator.WorldServer.ITEMDatabase[Item.Key].GetSlots;
+            var Slots = worldState.ItemDatabase[Item.Key].GetSlots;
             var array2 = Slots;
             var num = 0;
             while (true)

@@ -20,7 +20,8 @@ namespace Mangos.Configuration;
 
 public sealed class MangosConfiguration
 {
-    public required string AccountDataBaseConnectionString { get; init; }
+    // 'Account database' and 'Realm database' are interchangeable terms.
+    public required string AccountDatabaseConnectionString { get; init; }
 
     public required RealmConfiguration Realm { get; init; }
     public required ClusterConfiguration Cluster { get; init; }

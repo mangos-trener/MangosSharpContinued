@@ -17,11 +17,20 @@
 //
 
 using Mangos.Common.Enums.GameObject;
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
+using Mangos.World.DataStores;
 using Mangos.World.Globals;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
+using Mangos.World.Network;
+using Mangos.World.Objects.Factories;
+using Mangos.World.Objects.Factories.Packets;
 using Mangos.World.Player;
+using Mangos.World.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections;
@@ -33,6 +42,31 @@ namespace Mangos.World.Objects;
 
 public class WS_Transports
 {
+    private readonly ILogger<WS_Transports> logger;
+    private readonly WorldState worldState;
+    private readonly WS_DBCDatabase database;
+    private readonly WorldDatabase worldDatabase;
+    private readonly WS_Maps maps;
+    private readonly ICharacterResurrectionService characterResurrectionService;
+    private readonly TransportObjectFactory transportObjectFactory;
+
+    public WS_Transports(
+        ILogger<WS_Transports> logger,
+        WorldState worldState,
+        WS_DBCDatabase database,
+        WorldDatabase worldDatabase,
+        WS_Maps maps,
+        ICharacterResurrectionService characterResurrectionService,
+        TransportObjectFactory transportObjectFactory)
+    {
+        this.logger = logger;
+        this.worldState = worldState;
+        this.database = database;
+        this.worldDatabase = worldDatabase;
+        this.maps = maps;
+        this.characterResurrectionService = characterResurrectionService;
+        this.transportObjectFactory = transportObjectFactory;
+    }
     public class TransportMove
     {
         public float X;
@@ -101,8 +135,15 @@ public class WS_Transports
         }
     }
 
-    public class TransportObject : WS_GameObjects.GameObject
+    public class TransportObject : GameObject
     {
+        private readonly ILogger<TransportObject> logger;
+        private readonly WS_DBCDatabase database;
+        private readonly WS_Maps maps;
+        private readonly WS_Network network;
+        private readonly ICharacterResurrectionService characterResurrectionService;
+        private readonly UpdateClassFactory updateClassFactory;
+        private readonly int iD_;
         public string TransportName;
 
         private readonly List<WS_Base.BaseUnit> Passengers;
@@ -121,8 +162,23 @@ public class WS_Transports
 
         private int NextWaypoint;
 
-        public TransportObject(int ID_, string Name, int Period_)
-            : base(ID_, WorldServiceLocator.WSTransports.GetNewGUID())
+        public TransportObject(
+            ILogger<TransportObject> logger,
+            WorldState worldState,
+            WS_DBCDatabase database,
+            WorldDatabase worldDatabase,
+            WS_Maps maps,
+            WS_Loot loot,
+            WS_Combat combat,
+            WS_Network network,
+            WS_Handlers_Misc misc,
+            ICharacterResurrectionService characterResurrectionService,
+            GameObjectInfoFactory gameObjectInfoFactory,
+            UpdateClassFactory updateClassFactory,
+            int ID_,
+            string Name,
+            int Period_)
+            : base(logger, worldState, worldDatabase, maps, loot, combat, gameObjectInfoFactory, lootObjectFactory: null, updateClassFactory, ID_, GetNewGUID())
         {
             TransportName = "";
             Passengers = new List<WS_Base.BaseUnit>();
@@ -133,6 +189,13 @@ public class WS_Transports
             LastStop = -1;
             CurrentWaypoint = 0;
             NextWaypoint = 0;
+            this.logger = logger;
+            this.database = database;
+            this.maps = maps;
+            this.network = network;
+            this.characterResurrectionService = characterResurrectionService;
+            this.updateClassFactory = updateClassFactory;
+            iD_ = ID_;
             TransportName = Name;
             Period = Period_;
             if (GenerateWaypoints())
@@ -144,9 +207,9 @@ public class WS_Transports
                 orientation = 1f;
                 VisibleDistance = 99999f;
                 State = GameObjectLootState.DOOR_CLOSED;
-                WorldServiceLocator.WorldServer.WORLD_TRANSPORTs_Lock.AcquireWriterLock(-1);
-                WorldServiceLocator.WorldServer.WORLD_TRANSPORTs.Add(GUID, this);
-                WorldServiceLocator.WorldServer.WORLD_TRANSPORTs_Lock.ReleaseWriterLock();
+                worldState.WorldTransportsLock.EnterWriteLock();
+                worldState.WorldTransports.Add(GUID, this);
+                worldState.WorldTransportsLock.ExitWriteLock();
                 Update();
             }
         }
@@ -157,28 +220,28 @@ public class WS_Transports
             {
                 var PathID = (int)GetSound(0);
                 float ShipSpeed = GetSound(1);
-                if (!WorldServiceLocator.WSDBCDatabase.TaxiPaths.ContainsKey(PathID))
+                if (!database.TaxiPaths.ContainsKey(PathID))
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "An transport [{0} - {1}] is created with an invalid TaxiPath.", ID, TransportName);
+                    logger.LogCritical("An transport [{0} - {1}] is created with an invalid TaxiPath.", ID, TransportName);
                     return false;
                 }
                 var MapsUsed = 0;
                 var MapChange = 0;
                 List<TransportMove> PathPoints = new();
                 var t = 0;
-                if (WorldServiceLocator.WSDBCDatabase.TaxiPathNodes.ContainsKey(PathID))
+                if (database.TaxiPathNodes.ContainsKey(PathID))
                 {
-                    var num = WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID].Count - 2;
+                    var num = database.TaxiPathNodes[PathID].Count - 2;
                     for (var i = 0; i <= num; i++)
                     {
                         if (MapChange == 0)
                         {
-                            if (WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID].ContainsKey(i) & WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID].ContainsKey(i + 1))
+                            if (database.TaxiPathNodes[PathID].ContainsKey(i) & database.TaxiPathNodes[PathID].ContainsKey(i + 1))
                             {
-                                if (WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].MapID == WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i + 1].MapID)
+                                if (database.TaxiPathNodes[PathID][i].MapID == database.TaxiPathNodes[PathID][i + 1].MapID)
                                 {
-                                    PathPoints.Add(new TransportMove(WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].x, WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].y, WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].z, (uint)WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].MapID, WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].action, WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].waittime));
-                                    if (WorldServiceLocator.WSMaps.Maps.ContainsKey((uint)WorldServiceLocator.WSDBCDatabase.TaxiPathNodes[PathID][i].MapID))
+                                    PathPoints.Add(new TransportMove(database.TaxiPathNodes[PathID][i].x, database.TaxiPathNodes[PathID][i].y, database.TaxiPathNodes[PathID][i].z, (uint)database.TaxiPathNodes[PathID][i].MapID, database.TaxiPathNodes[PathID][i].action, database.TaxiPathNodes[PathID][i].waittime));
+                                    if (maps.Maps.ContainsKey((uint)database.TaxiPathNodes[PathID][i].MapID))
                                     {
                                         MapsUsed++;
                                     }
@@ -208,7 +271,7 @@ public class WS_Transports
                     {
                         PathPoints[j].DistFromPrev = PathPoints[j].ActionFlag == 1 || PathPoints[j].MapID != PathPoints[j - 1].MapID
                             ? 0f
-                            : WorldServiceLocator.WSCombat.GetDistance(PathPoints[j].X, PathPoints[j - 1].X, PathPoints[j].Y, PathPoints[j - 1].Y, PathPoints[j].Z, PathPoints[j - 1].Z);
+                            : WS_Combat.GetDistance(PathPoints[j].X, PathPoints[j - 1].X, PathPoints[j].Y, PathPoints[j - 1].Y, PathPoints[j].Z, PathPoints[j - 1].Z);
                         if (PathPoints[j].ActionFlag == 2)
                         {
                             if (FirstStop == -1)
@@ -367,7 +430,7 @@ public class WS_Transports
             {
                 return;
             }
-            var Timer = WorldServiceLocator.WSNetwork.MsTime() % Period;
+            var Timer = network.MsTime() % Period;
             while (Math.Abs(checked(Timer - Waypoints[CurrentWaypoint].Time)) % PathTime > Math.Abs(checked(Waypoints[NextWaypoint].Time - Waypoints[CurrentWaypoint].Time)) % PathTime)
             {
                 CurrentWaypoint = GetNextWaypoint();
@@ -415,12 +478,12 @@ public class WS_Transports
             }
         }
 
-        public void CreateEveryoneOnTransport(ref WS_PlayerData.CharacterObject Character)
+        public void CreateEveryoneOnTransport(ref CharacterObject Character)
         {
             Packets.PacketClass mePacket = new(Opcodes.SMSG_UPDATE_OBJECT);
             mePacket.AddInt32(1);
             mePacket.AddInt8(0);
-            Packets.UpdateClass meTmpUpdate = new(WorldServiceLocator.GlobalConstants.FIELD_MASK_SIZE_PLAYER);
+            var meTmpUpdate = updateClassFactory.Create(MangosGlobalConstants.FIELD_MASK_SIZE_PLAYER);
             Character.FillAllUpdateFlags(ref meTmpUpdate);
             meTmpUpdate.AddToPacket(ref mePacket, ObjectUpdateType.UPDATETYPE_CREATE_OBJECT, ref Character);
             meTmpUpdate.Dispose();
@@ -436,7 +499,7 @@ public class WS_Transports
                 }
                 switch (tmpUnit)
                 {
-                    case WS_PlayerData.CharacterObject _:
+                    case CharacterObject _:
                         {
                             var obj = Character;
                             WS_Base.BaseObject objCharacter = tmpUnit;
@@ -449,10 +512,10 @@ public class WS_Transports
                                 {
                                     myPacket2.AddInt32(1);
                                     myPacket2.AddInt8(0);
-                                    Packets.UpdateClass myTmpUpdate2 = new(WorldServiceLocator.GlobalConstants.FIELD_MASK_SIZE_PLAYER);
-                                    ((WS_PlayerData.CharacterObject)tmpUnit).FillAllUpdateFlags(ref myTmpUpdate2);
+                                    var myTmpUpdate2 = updateClassFactory.Create(MangosGlobalConstants.FIELD_MASK_SIZE_PLAYER);
+                                    ((CharacterObject)tmpUnit).FillAllUpdateFlags(ref myTmpUpdate2);
                                     var updateClass = myTmpUpdate2;
-                                    WS_PlayerData.CharacterObject updateObject = (WS_PlayerData.CharacterObject)tmpUnit;
+                                    CharacterObject updateObject = (CharacterObject)tmpUnit;
                                     updateClass.AddToPacket(ref myPacket2, ObjectUpdateType.UPDATETYPE_CREATE_OBJECT, ref updateObject);
                                     myTmpUpdate2.Dispose();
                                     Character.client.Send(ref myPacket2);
@@ -461,18 +524,18 @@ public class WS_Transports
                                 {
                                     myPacket2.Dispose();
                                 }
-                                ((WS_PlayerData.CharacterObject)tmpUnit).SeenBy.Add(Character.GUID);
+                                ((CharacterObject)tmpUnit).SeenBy.Add(Character.GUID);
                                 Character.playersNear.Add(tmpUnit.GUID);
                             }
-                            WS_PlayerData.CharacterObject obj2 = (WS_PlayerData.CharacterObject)tmpUnit;
+                            CharacterObject obj2 = (CharacterObject)tmpUnit;
                             objCharacter = Character;
                             flag = obj2.CanSee(ref objCharacter);
-                            Character = (WS_PlayerData.CharacterObject)objCharacter;
+                            Character = (CharacterObject)objCharacter;
                             if (flag)
                             {
-                                ((WS_PlayerData.CharacterObject)tmpUnit).client.SendMultiplyPackets(ref mePacket);
+                                ((CharacterObject)tmpUnit).client.SendMultiplyPackets(ref mePacket);
                                 Character.SeenBy.Add(tmpUnit.GUID);
-                                ((WS_PlayerData.CharacterObject)tmpUnit).playersNear.Add(Character.GUID);
+                                ((CharacterObject)tmpUnit).playersNear.Add(Character.GUID);
                             }
 
                             break;
@@ -495,7 +558,7 @@ public class WS_Transports
                                 {
                                     myPacket.AddInt32(1);
                                     myPacket.AddInt8(0);
-                                    Packets.UpdateClass myTmpUpdate = new(WorldServiceLocator.GlobalConstants.FIELD_MASK_SIZE_UNIT);
+                                    var myTmpUpdate = updateClassFactory.Create(MangosGlobalConstants.FIELD_MASK_SIZE_UNIT);
                                     ((WS_Creatures.CreatureObject)tmpUnit).FillAllUpdateFlags(ref myTmpUpdate);
                                     var updateClass2 = myTmpUpdate;
                                     WS_Creatures.CreatureObject updateObject2 = (WS_Creatures.CreatureObject)tmpUnit;
@@ -507,7 +570,7 @@ public class WS_Transports
                                 {
                                     myPacket.Dispose();
                                 }
-                                ((WS_PlayerData.CharacterObject)tmpUnit).SeenBy.Add(Character.GUID);
+                                ((CharacterObject)tmpUnit).SeenBy.Add(Character.GUID);
                                 Character.creaturesNear.Add(tmpUnit.GUID);
                             }
 
@@ -522,16 +585,16 @@ public class WS_Transports
         {
             byte TileX = default;
             byte TileY = default;
-            WorldServiceLocator.WSMaps.GetMapTile(positionX, positionY, ref TileX, ref TileY);
+            maps.GetMapTile(positionX, positionY, ref TileX, ref TileY);
             if (!Teleported && CellX == TileX && CellY == TileY)
             {
                 return;
             }
-            if (WorldServiceLocator.WSMaps.Maps[MapID].Tiles[CellX, CellY] != null)
+            if (maps.Maps[MapID].Tiles[CellX, CellY] != null)
             {
                 try
                 {
-                    WorldServiceLocator.WSMaps.Maps[MapID].Tiles[CellX, CellY].GameObjectsHere.Remove(GUID);
+                    maps.Maps[MapID].Tiles[CellX, CellY].GameObjectsHere.Remove(GUID);
                 }
                 catch (Exception projectError)
                 {
@@ -541,11 +604,11 @@ public class WS_Transports
             }
             CellX = TileX;
             CellY = TileY;
-            if (WorldServiceLocator.WSMaps.Maps[MapID].Tiles[CellX, CellY] != null)
+            if (maps.Maps[MapID].Tiles[CellX, CellY] != null)
             {
                 try
                 {
-                    WorldServiceLocator.WSMaps.Maps[MapID].Tiles[CellX, CellY].GameObjectsHere.Add(GUID);
+                    maps.Maps[MapID].Tiles[CellX, CellY].GameObjectsHere.Add(GUID);
                 }
                 catch (Exception projectError2)
                 {
@@ -566,17 +629,17 @@ public class WS_Transports
                     short j = -1;
                     do
                     {
-                        if ((short)unchecked(CellX + i) >= 0 && (short)unchecked(CellX + i) <= 63 && (short)unchecked(CellY + j) >= 0 && (short)unchecked(CellY + j) <= 63 && WorldServiceLocator.WSMaps.Maps[MapID].Tiles[(short)unchecked(CellX + i), (short)unchecked(CellY + j)] != null && WorldServiceLocator.WSMaps.Maps[MapID].Tiles[(short)unchecked(CellX + i), (short)unchecked(CellY + j)].PlayersHere.Count > 0)
+                        if ((short)unchecked(CellX + i) >= 0 && (short)unchecked(CellX + i) <= 63 && (short)unchecked(CellY + j) >= 0 && (short)unchecked(CellY + j) <= 63 && maps.Maps[MapID].Tiles[(short)unchecked(CellX + i), (short)unchecked(CellY + j)] != null && maps.Maps[MapID].Tiles[(short)unchecked(CellX + i), (short)unchecked(CellY + j)].PlayersHere.Count > 0)
                         {
-                            var tMapTile = WorldServiceLocator.WSMaps.Maps[MapID].Tiles[(short)unchecked(CellX + i), (short)unchecked(CellY + j)];
+                            var tMapTile = maps.Maps[MapID].Tiles[(short)unchecked(CellX + i), (short)unchecked(CellY + j)];
                             var list = tMapTile.PlayersHere.ToArray();
                             var array = list;
                             foreach (var plGUID in array)
                             {
                                 int num;
-                                if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(plGUID))
+                                if (worldState.Characters.ContainsKey(plGUID))
                                 {
-                                    var characterObject = WorldServiceLocator.WorldServer.CHARACTERs[plGUID];
+                                    var characterObject = worldState.Characters[plGUID];
                                     WS_Base.BaseObject objCharacter = this;
                                     num = characterObject.CanSee(ref objCharacter) ? 1 : 0;
                                 }
@@ -597,16 +660,16 @@ public class WS_Transports
                                     {
                                         tempPacket.AddInt32(1);
                                         tempPacket.AddInt8(0);
-                                        Packets.UpdateClass tmpUpdate = new(WorldServiceLocator.GlobalConstants.FIELD_MASK_SIZE_GAMEOBJECT);
+                                        var tmpUpdate = updateClassFactory.Create(MangosGlobalConstants.FIELD_MASK_SIZE_GAMEOBJECT);
                                         try
                                         {
-                                            Dictionary<ulong, WS_PlayerData.CharacterObject> cHARACTERs;
+                                            Dictionary<ulong, CharacterObject> cHARACTERs;
                                             ulong key;
-                                            var Character = (cHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[key = plGUID];
+                                            var Character = (cHARACTERs = worldState.Characters)[key = plGUID];
                                             FillAllUpdateFlags(ref tmpUpdate, ref Character);
                                             cHARACTERs[key] = Character;
                                             var updateClass = tmpUpdate;
-                                            WS_GameObjects.GameObject updateObject = this;
+                                            GameObject updateObject = this;
                                             updateClass.AddToPacket(ref packet, ObjectUpdateType.UPDATETYPE_CREATE_OBJECT, ref updateObject);
                                         }
                                         finally
@@ -614,7 +677,7 @@ public class WS_Transports
                                             tmpUpdate.Dispose();
                                         }
 
-                                        if (WorldServiceLocator.WorldServer.CHARACTERs.TryGetValue(plGUID, out var _character))
+                                        if (worldState.Characters.TryGetValue(plGUID, out var _character))
                                         {
                                             _character?.client?.SendMultiplyPackets(ref packet);
                                             _character?.gameObjectsNear?.Add(GUID);
@@ -622,12 +685,12 @@ public class WS_Transports
                                         }
                                         else
                                         {
-                                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, $"Failed to retrieve character {plGUID}");
+                                            logger.LogWarning($"Failed to retrieve character {plGUID}");
                                         }
                                     }
                                     catch (Exception ex)
                                     {
-                                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, $"{ex.Message}{Environment.NewLine}");
+                                        logger.LogError($"{ex.Message}{Environment.NewLine}");
                                     }
                                 }
                             }
@@ -646,12 +709,12 @@ public class WS_Transports
             var array = SeenBy.ToArray();
             foreach (var plGUID in array)
             {
-                if (WorldServiceLocator.WorldServer.CHARACTERs[plGUID].gameObjectsNear.Contains(GUID))
+                if (worldState.Characters[plGUID].gameObjectsNear.Contains(GUID))
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs[plGUID].guidsForRemoving_Lock.AcquireWriterLock(WorldServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-                    WorldServiceLocator.WorldServer.CHARACTERs[plGUID].guidsForRemoving.Add(GUID);
-                    WorldServiceLocator.WorldServer.CHARACTERs[plGUID].guidsForRemoving_Lock.ReleaseWriterLock();
-                    WorldServiceLocator.WorldServer.CHARACTERs[plGUID].gameObjectsNear.Remove(GUID);
+                    worldState.Characters[plGUID].guidsForRemoving_Lock.AcquireWriterLock(MangosGlobalConstants.DEFAULT_LOCK_TIMEOUT);
+                    worldState.Characters[plGUID].guidsForRemoving.Add(GUID);
+                    worldState.Characters[plGUID].guidsForRemoving_Lock.ReleaseWriterLock();
+                    worldState.Characters[plGUID].gameObjectsNear.Remove(GUID);
                     SeenBy.Remove(plGUID);
                 }
             }
@@ -678,11 +741,10 @@ public class WS_Transports
                     {
                         switch (tmpUnit)
                         {
-                            case WS_PlayerData.CharacterObject _:
+                            case CharacterObject _:
                                 {
-                                    var wS_Handlers_Misc = WorldServiceLocator.WSHandlersMisc;
-                                    WS_PlayerData.CharacterObject Character = (WS_PlayerData.CharacterObject)tmpUnit;
-                                    wS_Handlers_Misc.CharacterResurrect(ref Character);
+                                    CharacterObject Character = (CharacterObject)tmpUnit;
+                                    characterResurrectionService.CharacterResurrect(ref Character);
                                     break;
                                 }
 
@@ -696,10 +758,10 @@ public class WS_Transports
                     }
                     switch (tmpUnit)
                     {
-                        case WS_PlayerData.CharacterObject _:
-                            if (((WS_PlayerData.CharacterObject)tmpUnit).OnTransport != null && ((WS_PlayerData.CharacterObject)tmpUnit).OnTransport == this)
+                        case CharacterObject _:
+                            if (((CharacterObject)tmpUnit).OnTransport != null && ((CharacterObject)tmpUnit).OnTransport == this)
                             {
-                                ((WS_PlayerData.CharacterObject)tmpUnit).Teleport(PosX, PosY, PosZ, ((WS_PlayerData.CharacterObject)tmpUnit).orientation, checked((int)NewMap));
+                                ((CharacterObject)tmpUnit).Teleport(PosX, PosY, PosZ, ((CharacterObject)tmpUnit).orientation, checked((int)NewMap));
                                 continue;
                             }
                             lock (Passengers)
@@ -721,7 +783,7 @@ public class WS_Transports
                 {
                     ProjectData.SetProjectError(ex2);
                     var ex = ex2;
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Failed to transfer player [0x{0:X}].{1}{2}", tmpUnit.GUID, Environment.NewLine, ex.ToString());
+                    logger.LogCritical("Failed to transfer player [0x{0:X}].{1}{2}", tmpUnit.GUID, Environment.NewLine, ex.ToString());
                     ProjectData.ClearProjectError();
                 }
             }
@@ -736,7 +798,7 @@ public class WS_Transports
             }
         }
 
-        public override void FillAllUpdateFlags(ref Packets.UpdateClass Update, ref WS_PlayerData.CharacterObject Character)
+        public override void FillAllUpdateFlags(ref Packets.UpdateClass Update, ref CharacterObject Character)
         {
             Update.SetUpdateFlag(0, GUID);
             Update.SetUpdateFlag(2, 33);
@@ -753,11 +815,9 @@ public class WS_Transports
         }
     }
 
-    private ulong GetNewGUID()
+    private static ulong GetNewGUID()
     {
-        ref var transportGUIDCounter = ref WorldServiceLocator.WorldServer.TransportGUIDCounter;
-        transportGUIDCounter = Convert.ToUInt64(decimal.Add(new decimal(transportGUIDCounter), 1m));
-        return WorldServiceLocator.WorldServer.TransportGUIDCounter;
+        return ++WorldState.TransportGuidCounter;
     }
 
     public void LoadTransports()
@@ -765,7 +825,7 @@ public class WS_Transports
         try
         {
             DataTable TransportQuery = new();
-            WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT * FROM transports", ref TransportQuery);
+            worldDatabase.Query("SELECT * FROM transports", ref TransportQuery);
             IEnumerator enumerator = default;
             try
             {
@@ -776,7 +836,7 @@ public class WS_Transports
                     var TransportEntry = row.As<int>("entry");
                     var TransportName = row.As<string>("name");
                     var TransportPeriod = row.As<int>("period");
-                    TransportObject newTransport = new(TransportEntry, TransportName, TransportPeriod);
+                    var newTransport = transportObjectFactory.Create(TransportEntry, TransportName, TransportPeriod);
                 }
             }
             finally
@@ -786,7 +846,7 @@ public class WS_Transports
                     (enumerator as IDisposable).Dispose();
                 }
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "Database: {0} Transports initialized.", TransportQuery.Rows.Count);
+            logger.LogInformation("Database: {0} Transports initialized.", TransportQuery.Rows.Count);
         }
         catch (DirectoryNotFoundException ex)
         {

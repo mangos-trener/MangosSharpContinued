@@ -21,8 +21,9 @@ using Mangos.Common.Enums.Group;
 using Mangos.Common.Globals;
 using Mangos.World.Globals;
 using Mangos.World.Network;
-using Mangos.World.Objects;
-using Microsoft.VisualBasic.CompilerServices;
+using Mangos.World.Objects.Factories;
+using Mangos.World.Objects.Factories.Loot;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 
@@ -32,6 +33,10 @@ public partial class WS_Loot
 {
     public class LootObject : IDisposable
     {
+        private readonly ILogger<LootObject> logger;
+        private readonly WorldState worldState;
+        private readonly Func<ItemObjectFactory> itemObjectFactory;
+        private readonly GroupLootInfoFactory groupLootInfoFactory;
         public ulong GUID;
 
         public List<LootItem> Items;
@@ -68,7 +73,13 @@ public partial class WS_Loot
             }
         }
 
-        public LootObject(ulong GUID_, LootType LootType_)
+        public LootObject(
+            ILogger<LootObject> logger,
+            WorldState worldState,
+            Func<ItemObjectFactory> itemObjectFactory,
+            GroupLootInfoFactory groupLootInfoFactory,
+            ulong GUID_,
+            LootType LootType_)
         {
             GUID = 0uL;
             Items = new List<LootItem>();
@@ -76,7 +87,11 @@ public partial class WS_Loot
             LootType = LootType.LOOTTYPE_CORPSE;
             LootOwner = 0uL;
             GroupLootInfo = new Dictionary<int, GroupLootInfo>(0);
-            WorldServiceLocator.WSLoot.LootTable[GUID_] = this;
+            this.logger = logger;
+            this.worldState = worldState;
+            this.itemObjectFactory = itemObjectFactory;
+            this.groupLootInfoFactory = groupLootInfoFactory;
+            WS_Loot.LootTable[GUID_] = this;
             LootType = LootType_;
             GUID = GUID_;
         }
@@ -85,7 +100,7 @@ public partial class WS_Loot
         {
             if (Items.Count == 0)
             {
-                WorldServiceLocator.WSLoot.SendEmptyLoot(GUID, LootType, ref client);
+                WS_Loot.SendEmptyLoot(logger, GUID, LootType, ref client);
                 return;
             }
             if (decimal.Compare(new decimal(LootOwner), 0m) != 0 && client.Character.GUID != LootOwner)
@@ -152,15 +167,10 @@ public partial class WS_Loot
             }
             while (i <= (uint)b2)
             {
-                if (Items[i] != null && WorldServiceLocator.WorldServer.ITEMDatabase[Items[i].ItemID].Quality >= (int)client.Character.Group.LootThreshold)
+                if (Items[i] != null && worldState.ItemDatabase[Items[i].ItemID].Quality >= (int)client.Character.Group.LootThreshold)
                 {
-                    GroupLootInfo[i] = new GroupLootInfo
-                    {
-                        LootObject = this,
-                        LootSlot = i,
-                        Item = Items[i]
-                    };
-                    WorldServiceLocator.WSLoot.StartRoll(GUID, i, ref client.Character);
+                    GroupLootInfo[i] = groupLootInfoFactory.Create(this, i, Items[i]);
+                    WS_Loot.StartRoll(worldState, GUID, i, ref client.Character);
                     break;
                 }
                 checked
@@ -196,10 +206,8 @@ public partial class WS_Loot
                     response3.Dispose();
                     return;
                 }
-                ItemObject itemObject = new(Items[Slot].ItemID, client.Character.GUID)
-                {
-                    StackCount = Items[Slot].ItemCount
-                };
+
+                var itemObject = itemObjectFactory().Create(Items[Slot].ItemID, client.Character.GUID, Items[Slot].ItemCount);
                 var tmpItem = itemObject;
                 if (client.Character.ItemADD(ref tmpItem))
                 {
@@ -236,7 +244,7 @@ public partial class WS_Loot
             }
             catch (Exception e)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Error getting loot.{0}", Environment.NewLine + e);
+                logger.LogWarning("Error getting loot.{0}", Environment.NewLine + e);
             }
         }
 
@@ -253,8 +261,8 @@ public partial class WS_Loot
         {
             if (!_disposedValue)
             {
-                WorldServiceLocator.WSLoot.LootTable.Remove(GUID);
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Loot destroyed.");
+                WS_Loot.LootTable.Remove(GUID);
+                logger.LogDebug("Loot destroyed.");
             }
             _disposedValue = true;
         }

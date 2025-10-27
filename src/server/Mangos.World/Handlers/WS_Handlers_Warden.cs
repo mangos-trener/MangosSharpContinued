@@ -16,13 +16,15 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Warden;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy;
 using Mangos.World.Globals;
 using Mangos.World.Network;
+using Mangos.World.Objects.Factories.Warden;
 using Mangos.World.Player;
 using Mangos.World.Warden;
+using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
 using System.Security.Cryptography;
@@ -31,6 +33,17 @@ namespace Mangos.World.Handlers;
 
 public class WS_Handlers_Warden
 {
+    private readonly ILogger<WS_Handlers_Warden> logger;
+    private readonly ICluster cluster;
+    private readonly WardenScanFactory wardenScanFactory;
+
+    public WS_Handlers_Warden(ILogger<WS_Handlers_Warden> logger, ICluster cluster, WardenScanFactory wardenScanFactory)
+    {
+        this.logger = logger;
+        this.cluster = cluster;
+        this.wardenScanFactory = wardenScanFactory;
+    }
+
     public class WardenData
     {
         public byte Failed;
@@ -205,7 +218,7 @@ public class WS_Handlers_Warden
         Buffer.BlockCopy(b, 0, packet.Data, 6, b.Length);
         packet.GetInt16();
         MaievResponse Response = (MaievResponse)packet.GetInt8();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_WARDEN_DATA [{2}]", client.IP, client.Port, Response);
+        logger.LogDebug("[{0}:{1}] CMSG_WARDEN_DATA [{2}]", client.IP, client.Port, Response);
         if (!client.Character.WardenData.Ready)
         {
             return;
@@ -253,7 +266,7 @@ public class WS_Handlers_Warden
                     var HandledBytes = WorldServiceLocator.WSWarden.Maiev.HandlePacket(PacketData);
                     if (HandledBytes <= 0)
                     {
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Failed to handle 0x05 packet.");
+                        logger.LogCritical("[WARDEN] Failed to handle 0x05 packet.");
                         break;
                     }
                     var thePacket = WorldServiceLocator.WSWarden.Maiev.ReadPacket();
@@ -261,7 +274,7 @@ public class WS_Handlers_Warden
                     Array.Copy(thePacket, 1, ourHash, 0, ourHash.Length);
                     WorldServiceLocator.WSWarden.Maiev.ReadXorByte(ref client.Character);
                     WorldServiceLocator.WSWarden.Maiev.ReadKeys(ref client.Character);
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] XorByte: {0}", client.Character.WardenData.xorByte);
+                    logger.LogDebug("[WARDEN] XorByte: {0}", client.Character.WardenData.xorByte);
                     var HashCorrect = true;
                     var i = 0;
                     do
@@ -276,7 +289,7 @@ public class WS_Handlers_Warden
                     while (i <= 19);
                     if (!HashCorrect)
                     {
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Hashes in packet 0x05 didn't match. Cheater?");
+                        logger.LogCritical("[WARDEN] Hashes in packet 0x05 didn't match. Cheater?");
                     }
                     break;
                 }
@@ -287,29 +300,29 @@ public class WS_Handlers_Warden
         }
     }
 
-    public void MaievInit(ref WS_PlayerData.CharacterObject objCharacter)
+    public void MaievInit(ref CharacterObject objCharacter)
     {
-        var i = WorldServiceLocator.WorldServer.ClsWorldServer.Cluster.ClientGetCryptKey(objCharacter.client.Index);
+        var i = cluster.ClientGetCryptKey(objCharacter.client.Index);
         MaievData j = new(i);
         var seedOut = j.GetBytes(16);
         var seedIn = j.GetBytes(16);
         objCharacter.WardenData.KeyOut = RC4.Init(seedOut);
         objCharacter.WardenData.KeyIn = RC4.Init(seedIn);
         objCharacter.WardenData.Ready = true;
-        objCharacter.WardenData.Scan = new WS_Warden.WardenScan(ref objCharacter);
+        objCharacter.WardenData.Scan = wardenScanFactory.Create(ref objCharacter);
         objCharacter.WardenData.xorByte = 0;
         objCharacter.WardenData.K = i;
-        WorldServiceLocator.Functions.RAND_bytes(ref objCharacter.WardenData.Seed, 16);
+        Globals.Functions.RAND_bytes(ref objCharacter.WardenData.Seed, 16);
         MaievSendModule(ref objCharacter);
     }
 
-    public void MaievSendModule(ref WS_PlayerData.CharacterObject objCharacter)
+    public void MaievSendModule(ref CharacterObject objCharacter)
     {
         if (!objCharacter.WardenData.Ready)
         {
             throw new ApplicationException("Maiev.mod not ready!");
         }
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_WARDEN_DATA [{2}]", objCharacter.client.IP, objCharacter.client.Port, WorldServiceLocator.WSWarden.Maiev.ModuleName);
+        logger.LogDebug("[{0}:{1}] SMSG_WARDEN_DATA [{2}]", objCharacter.client.IP, objCharacter.client.Port, WorldServiceLocator.WSWarden.Maiev.ModuleName);
         Packets.PacketClass r = new(Opcodes.SMSG_WARDEN_DATA);
         r.AddInt8(0);
         r.AddByteArray(WorldServiceLocator.WSWarden.Maiev.WardenModule);
@@ -318,7 +331,7 @@ public class WS_Handlers_Warden
         WorldServiceLocator.WSWarden.SendWardenPacket(ref objCharacter, ref r);
     }
 
-    public void MaievSendTransfer(ref WS_PlayerData.CharacterObject objCharacter)
+    public void MaievSendTransfer(ref CharacterObject objCharacter)
     {
         if (!objCharacter.WardenData.Ready)
         {
@@ -340,7 +353,7 @@ public class WS_Handlers_Warden
                     i++;
                 }
                 while (i <= 500);
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_WARDEN_DATA [data]", objCharacter.client.IP, objCharacter.client.Port);
+                logger.LogDebug("[{0}:{1}] SMSG_WARDEN_DATA [data]", objCharacter.client.IP, objCharacter.client.Port);
                 WorldServiceLocator.WSWarden.SendWardenPacket(ref objCharacter, ref r);
             }
             if (size > 0)
@@ -353,13 +366,13 @@ public class WS_Handlers_Warden
                 {
                     r2.AddInt8((byte)file.ReadByte());
                 }
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] SMSG_WARDEN_DATA [done]", objCharacter.client.IP, objCharacter.client.Port);
+                logger.LogDebug("[{0}:{1}] SMSG_WARDEN_DATA [done]", objCharacter.client.IP, objCharacter.client.Port);
                 WorldServiceLocator.WSWarden.SendWardenPacket(ref objCharacter, ref r2);
             }
         }
     }
 
-    public void MaievSendUnk(ref WS_PlayerData.CharacterObject objCharacter)
+    public void MaievSendUnk(ref CharacterObject objCharacter)
     {
         Packets.PacketClass unk = new(Opcodes.SMSG_WARDEN_DATA);
         try
@@ -432,7 +445,7 @@ public class WS_Handlers_Warden
         }
     }
 
-    public void MaievSendCheck(ref WS_PlayerData.CharacterObject objCharacter)
+    public void MaievSendCheck(ref CharacterObject objCharacter)
     {
         if (!objCharacter.WardenData.Ready)
         {
@@ -450,7 +463,7 @@ public class WS_Handlers_Warden
         }
     }
 
-    public void MaievSendSeed(ref WS_PlayerData.CharacterObject objCharacter)
+    public void MaievSendSeed(ref CharacterObject objCharacter)
     {
         Packets.PacketClass r = new(Opcodes.SMSG_WARDEN_DATA);
         r.AddInt8(5);
@@ -458,7 +471,7 @@ public class WS_Handlers_Warden
         WorldServiceLocator.WSWarden.SendWardenPacket(ref objCharacter, ref r);
     }
 
-    public void MaievResult(ref WS_PlayerData.CharacterObject objCharacter, ref Packets.PacketClass Packet)
+    public void MaievResult(ref CharacterObject objCharacter, ref Packets.PacketClass Packet)
     {
         var bufLen = Packet.GetUInt16();
         var checkSum = Packet.GetUInt32();
@@ -467,11 +480,11 @@ public class WS_Handlers_Warden
         Packet.Offset = tmpOffset;
         if (!ControlChecksum(checkSum, data))
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "[WARDEN] Failed checkSum at result packet. Cheater?");
+            logger.LogCritical("[WARDEN] Failed checkSum at result packet. Cheater?");
             objCharacter.CommandResponse("[WARDEN] Pack your bags cheater, you're going!");
             return;
         }
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] Result bufLen:{0} checkSum:{1:X}", bufLen, checkSum);
+        logger.LogDebug("[WARDEN] Result bufLen:{0} checkSum:{1:X}", bufLen, checkSum);
         objCharacter.WardenData.Scan.HandleResponse(ref Packet);
     }
 

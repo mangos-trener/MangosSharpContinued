@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.Cluster.DataStores;
 using Mangos.Common.Legacy;
 using System;
 using System.Collections.Generic;
@@ -27,11 +28,15 @@ public partial class WcGuild
 {
     public class Guild : IDisposable
     {
-        private readonly ClusterServiceLocator _clusterServiceLocator;
+        private readonly LegacyWorldCluster cluster;
+        private readonly WsDbcDatabase database;
+        private readonly WcGuild guild;
 
-        public Guild(ClusterServiceLocator clusterServiceLocator)
+        public Guild(LegacyWorldCluster cluster, WsDbcDatabase database, WcGuild guild)
         {
-            _clusterServiceLocator = clusterServiceLocator;
+            this.cluster = cluster;
+            this.database = database;
+            this.guild = guild;
         }
 
         public uint Id;
@@ -55,7 +60,7 @@ public partial class WcGuild
         {
             Id = guildId;
             DataTable mySqlQuery = new();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query("SELECT * FROM guilds WHERE guild_id = " + Id + ";", ref mySqlQuery);
+            database.GetCharacterDatabase().Query("SELECT * FROM guilds WHERE guild_id = " + Id + ";", ref mySqlQuery);
             if (mySqlQuery.Rows.Count == 0)
             {
                 throw new ApplicationException("GuildID " + Id + " not found in database.");
@@ -80,13 +85,13 @@ public partial class WcGuild
             }
 
             mySqlQuery.Clear();
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Query("SELECT char_guid FROM characters WHERE char_guildId = " + Id + ";", ref mySqlQuery);
+            database.GetCharacterDatabase().Query("SELECT char_guid FROM characters WHERE char_guildId = " + Id + ";", ref mySqlQuery);
             foreach (DataRow memberInfo in mySqlQuery.Rows)
             {
                 Members.Add(guildInfo.As<ulong>("char_guid"));
             }
 
-            _clusterServiceLocator.WcGuild.GuilDs.Add(Id, this);
+            guild.GuilDs.Add(Id, this);
         }
 
         private bool _disposedValue; // To detect redundant calls
@@ -98,7 +103,7 @@ public partial class WcGuild
             {
                 // TODO: free unmanaged resources (unmanaged objects) and override Finalize() below.
                 // TODO: set large fields to null.
-                _clusterServiceLocator.WcGuild.GuilDs.Remove(Id);
+                guild.GuilDs.Remove(Id);
             }
 
             _disposedValue = true;

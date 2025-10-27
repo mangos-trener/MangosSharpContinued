@@ -19,8 +19,13 @@
 using Mangos.Common.Enums.Chat;
 using Mangos.Common.Enums.Misc;
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
 using System;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 namespace Mangos.World.Scripts.Creatures;
 
@@ -40,7 +45,8 @@ public class CreatureAI_Lord_Serpentis : WS_Creatures_AI.BossAI
     // Public NextSerpentForm As Integer = 0 'This should never be re-casted.
     public int CurrentWaypoint;
 
-    public CreatureAI_Lord_Serpentis(ref WS_Creatures.CreatureObject Creature) : base(ref Creature)
+    public CreatureAI_Lord_Serpentis(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature)
     {
         AllowedMove = false;
         Creature.Flying = false;

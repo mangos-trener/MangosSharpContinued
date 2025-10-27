@@ -16,15 +16,15 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Item;
 using Mangos.Common.Enums.Misc;
 using Mangos.Common.Globals;
 using Mangos.World.Globals;
 using Mangos.World.Network;
 using Mangos.World.Objects;
+using Mangos.World.Objects.Factories;
 using Mangos.World.Player;
-using Microsoft.VisualBasic.CompilerServices;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 
@@ -32,13 +32,27 @@ namespace Mangos.World.Handlers;
 
 public class WS_Handlers_Trade
 {
+    private readonly ILogger<WS_Handlers_Trade> logger;
+    private readonly WorldState worldState;
+    private readonly TradeInfoFactory tradeInfoFactory;
+
+    public WS_Handlers_Trade(
+        ILogger<WS_Handlers_Trade> logger,
+        WorldState worldState,
+        TradeInfoFactory tradeInfoFactory)
+    {
+        this.logger = logger;
+        this.worldState = worldState;
+        this.tradeInfoFactory = tradeInfoFactory;
+    }
+
     public class TTradeInfo : IDisposable
     {
         public int ID;
+        private readonly ILogger<TTradeInfo> logger;
+        public CharacterObject Trader;
 
-        public WS_PlayerData.CharacterObject Trader;
-
-        public WS_PlayerData.CharacterObject Target;
+        public CharacterObject Target;
 
         public int[] TraderSlots;
 
@@ -54,7 +68,7 @@ public class WS_Handlers_Trade
 
         private bool _disposedValue;
 
-        public TTradeInfo(ref WS_PlayerData.CharacterObject Trader_, ref WS_PlayerData.CharacterObject Target_)
+        public TTradeInfo(ILogger<TTradeInfo> logger, ref CharacterObject Trader_, ref CharacterObject Target_)
         {
             ID = 0;
             Trader = null;
@@ -83,6 +97,7 @@ public class WS_Handlers_Trade
             };
             TargetGold = 0u;
             TargetAccept = false;
+            this.logger = logger;
             Trader = Trader_;
             Target = Target_;
             Trader.tradeInfo = this;
@@ -257,7 +272,7 @@ public class WS_Handlers_Trade
             }
         }
 
-        public void DoTrade(ref WS_PlayerData.CharacterObject Who)
+        public void DoTrade(ref CharacterObject Who)
         {
             Packets.PacketClass response = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -437,7 +452,7 @@ public class WS_Handlers_Trade
             }
             catch (Exception e)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Error doing trade: {0}{1}", Environment.NewLine, e.ToString());
+                logger.LogError("Error doing trade: {0}{1}", Environment.NewLine, e.ToString());
             }
         }
     }
@@ -448,7 +463,7 @@ public class WS_Handlers_Trade
         {
             return;
         }
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_CANCEL_TRADE", client.IP, client.Port);
+        logger.LogDebug("[{0}:{1}] CMSG_CANCEL_TRADE", client.IP, client.Port);
         if (client.Character.tradeInfo == null)
         {
             return;
@@ -471,7 +486,7 @@ public class WS_Handlers_Trade
     {
         packet.GetInt16();
         var gold = packet.GetUInt32();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_SET_TRADE_GOLD [gold={2}]", client.IP, client.Port, gold);
+        logger.LogDebug("[{0}:{1}] CMSG_SET_TRADE_GOLD [gold={2}]", client.IP, client.Port, gold);
         if (client.Character.tradeInfo != null)
         {
             if (client.Character.tradeInfo.Trader == client.Character)
@@ -501,7 +516,7 @@ public class WS_Handlers_Trade
             return;
         }
         var mySlot = packet.GetInt8();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_SET_TRADE_ITEM [slot={2} myBag={3} mySlot={4}]", client.IP, client.Port, slot, myBag, mySlot);
+        logger.LogDebug("[{0}:{1}] CMSG_SET_TRADE_ITEM [slot={2} myBag={3} mySlot={4}]", client.IP, client.Port, slot, myBag, mySlot);
         checked
         {
             if (client.Character.tradeInfo != null)
@@ -524,7 +539,7 @@ public class WS_Handlers_Trade
     {
         packet.GetInt16();
         var slot = packet.GetInt8();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_CLEAR_TRADE_ITEM [slot={2}]", client.IP, client.Port, slot);
+        logger.LogDebug("[{0}:{1}] CMSG_CLEAR_TRADE_ITEM [slot={2}]", client.IP, client.Port, slot);
         if (client.Character.tradeInfo.Trader == client.Character)
         {
             client.Character.tradeInfo.TraderSlots[slot] = -1;
@@ -541,7 +556,7 @@ public class WS_Handlers_Trade
     {
         packet.GetInt16();
         var targetGUID = packet.GetUInt64();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_INITIATE_TRADE [Trader={2} Target={3}]", client.IP, client.Port, client.Character.GUID, targetGUID);
+        logger.LogDebug("[{0}:{1}] CMSG_INITIATE_TRADE [Trader={2} Target={3}]", client.IP, client.Port, client.Character.GUID, targetGUID);
         if (client.Character.DEAD)
         {
             Packets.PacketClass response6 = new(Opcodes.SMSG_TRADE_STATUS);
@@ -584,7 +599,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (!WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(targetGUID))
+        if (!worldState.Characters.ContainsKey(targetGUID))
         {
             Packets.PacketClass response12 = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -598,7 +613,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs[targetGUID].DEAD)
+        if (worldState.Characters[targetGUID].DEAD)
         {
             Packets.PacketClass response13 = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -612,7 +627,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs[targetGUID].LogoutTimer != null)
+        if (worldState.Characters[targetGUID].LogoutTimer != null)
         {
             Packets.PacketClass response11 = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -626,7 +641,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (((uint)WorldServiceLocator.WorldServer.CHARACTERs[targetGUID].cUnitFlags & 0x40000u) != 0)
+        if (((uint)worldState.Characters[targetGUID].cUnitFlags & 0x40000u) != 0)
         {
             Packets.PacketClass response9 = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -654,7 +669,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs[targetGUID].tradeInfo != null)
+        if (worldState.Characters[targetGUID].tradeInfo != null)
         {
             Packets.PacketClass response5 = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -668,7 +683,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs[targetGUID].IsHorde != client.Character.IsHorde)
+        if (worldState.Characters[targetGUID].IsHorde != client.Character.IsHorde)
         {
             Packets.PacketClass response4 = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -682,7 +697,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (WorldServiceLocator.WSCombat.GetDistance(client.Character, WorldServiceLocator.WorldServer.CHARACTERs[targetGUID]) > 30f)
+        if (WS_Combat.GetDistance(client.Character, worldState.Characters[targetGUID]) > 30f)
         {
             Packets.PacketClass response3 = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -710,7 +725,7 @@ public class WS_Handlers_Trade
             }
             return;
         }
-        if (WorldServiceLocator.WorldServer.CHARACTERs[targetGUID].Access == AccessLevel.Trial)
+        if (worldState.Characters[targetGUID].Access == AccessLevel.Trial)
         {
             Packets.PacketClass response = new(Opcodes.SMSG_TRADE_STATUS);
             try
@@ -726,9 +741,9 @@ public class WS_Handlers_Trade
         }
         ref var character = ref client.Character;
         ulong key;
-        Dictionary<ulong, WS_PlayerData.CharacterObject> cHARACTERs;
-        var Target_ = (cHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[key = targetGUID];
-        TTradeInfo tTradeInfo = new(ref character, ref Target_);
+        Dictionary<ulong, CharacterObject> cHARACTERs;
+        var Target_ = (cHARACTERs = worldState.Characters)[key = targetGUID];
+        var tTradeInfo = tradeInfoFactory.Create(ref character, ref Target_);
         cHARACTERs[key] = Target_;
         Packets.PacketClass response_ok = new(Opcodes.SMSG_TRADE_STATUS);
         try
@@ -745,7 +760,7 @@ public class WS_Handlers_Trade
 
     public void On_CMSG_BEGIN_TRADE(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BEGIN_TRADE", client.IP, client.Port);
+        logger.LogDebug("[{0}:{1}] CMSG_BEGIN_TRADE", client.IP, client.Port);
         checked
         {
             client.Character.tradeInfo.ID++;
@@ -766,7 +781,7 @@ public class WS_Handlers_Trade
 
     public void On_CMSG_UNACCEPT_TRADE(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_UNACCEPT_TRADE", client.IP, client.Port);
+        logger.LogDebug("[{0}:{1}] CMSG_UNACCEPT_TRADE", client.IP, client.Port);
         Packets.PacketClass response = new(Opcodes.SMSG_TRADE_STATUS);
         try
         {
@@ -790,17 +805,17 @@ public class WS_Handlers_Trade
 
     public void On_CMSG_ACCEPT_TRADE(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_ACCEPT_TRADE", client.IP, client.Port);
+        logger.LogDebug("[{0}:{1}] CMSG_ACCEPT_TRADE", client.IP, client.Port);
         client.Character.tradeInfo.DoTrade(ref client.Character);
     }
 
     public void On_CMSG_IGNORE_TRADE(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_IGNORE_TRADE", client.IP, client.Port);
+        logger.LogDebug("[{0}:{1}] CMSG_IGNORE_TRADE", client.IP, client.Port);
     }
 
     public void On_CMSG_BUSY_TRADE(ref Packets.PacketClass packet, ref WS_Network.ClientClass client)
     {
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_BUSY_TRADE", client.IP, client.Port);
+        logger.LogDebug("[{0}:{1}] CMSG_BUSY_TRADE", client.IP, client.Port);
     }
 }

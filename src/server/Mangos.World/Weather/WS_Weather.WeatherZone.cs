@@ -16,15 +16,13 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Misc;
 using Mangos.Common.Globals;
 using Mangos.World.Globals;
-using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
-using System.Collections.Generic;
 
 namespace Mangos.World.Weather;
 
@@ -32,6 +30,8 @@ public partial class WS_Weather
 {
     public class WeatherZone
     {
+        private readonly ILogger<WeatherZone> logger;
+        private readonly WorldState worldState;
         public int ZoneID;
 
         public WeatherSeasonChances[] Seasons;
@@ -40,11 +40,13 @@ public partial class WS_Weather
 
         public float Intensity;
 
-        public WeatherZone(int ZoneID)
+        public WeatherZone(ILogger<WeatherZone> logger, WorldState worldState, int ZoneID)
         {
             Seasons = new WeatherSeasonChances[4];
             CurrentWeather = WeatherType.WEATHER_FINE;
             Intensity = 0f;
+            this.logger = logger;
+            this.worldState = worldState;
             this.ZoneID = ZoneID;
         }
 
@@ -58,7 +60,7 @@ public partial class WS_Weather
 
         public bool ChangeWeather()
         {
-            var u = WorldServiceLocator.WorldServer.Rnd.Next(0, 100);
+            var u = WorldState.Rnd.Next(0, 100);
             if (u >= 30)
             {
                 var oldWeather = CurrentWeather;
@@ -89,7 +91,7 @@ public partial class WS_Weather
                     }
                     if (Intensity > 2f / 3f)
                     {
-                        var v = WorldServiceLocator.WorldServer.Rnd.Next(0, 100);
+                        var v = WorldState.Rnd.Next(0, 100);
                         if (v < 50)
                         {
                             Intensity -= 2f / 3f;
@@ -104,7 +106,7 @@ public partial class WS_Weather
                 {
                     var chance2 = chance1 + Seasons[Season].SnowChance;
                     var chance3 = chance2 + Seasons[Season].StormChance;
-                    var r = WorldServiceLocator.WorldServer.Rnd.Next(0, 100);
+                    var r = WorldState.Rnd.Next(0, 100);
                     if (r < chance1)
                     {
                         CurrentWeather = WeatherType.WEATHER_RAIN;
@@ -123,18 +125,20 @@ public partial class WS_Weather
                     }
                     else if (u < 90)
                     {
-                        Intensity = (float)(WorldServiceLocator.WorldServer.Rnd.NextDouble() * 0.33329999446868896);
+                        Intensity = (float)(WorldState.Rnd.NextDouble() * 0.33329999446868896);
                     }
                     else
                     {
-                        r = WorldServiceLocator.WorldServer.Rnd.Next(0, 100);
+                        r = WorldState.Rnd.Next(0, 100);
                         Intensity = r < 50
-                            ? (float)(WorldServiceLocator.WorldServer.Rnd.NextDouble() * 0.33329999446868896) + 0.3334f
-                            : (float)(WorldServiceLocator.WorldServer.Rnd.NextDouble() * 0.33329999446868896) + 0.6667f;
+                            ? (float)(WorldState.Rnd.NextDouble() * 0.33329999446868896) + 0.3334f
+                            : (float)(WorldState.Rnd.NextDouble() * 0.33329999446868896) + 0.6667f;
                     }
+
                     return CurrentWeather != oldWeather || Intensity != oldIntensity;
                 }
             }
+
             bool ChangeWeather = default;
             return ChangeWeather;
         }
@@ -189,10 +193,10 @@ public partial class WS_Weather
             SMSG_WEATHER.AddInt32(GetSound());
             try
             {
-                WorldServiceLocator.WorldServer.CHARACTERs_Lock.AcquireReaderLock(WorldServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
+                worldState.CharactersLock.EnterReadLock();
                 try
                 {
-                    foreach (var Character in WorldServiceLocator.WorldServer.CHARACTERs)
+                    foreach (var Character in worldState.Characters)
                     {
                         if (Character.Value.client != null && Character.Value.ZoneID == ZoneID)
                         {
@@ -204,28 +208,29 @@ public partial class WS_Weather
                 {
                     ProjectData.SetProjectError(ex4);
                     var ex3 = ex4;
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Error updating Weather.{0}{1}", Environment.NewLine, ex3.ToString());
+                    logger.LogCritical("Error updating Weather.{0}{1}", Environment.NewLine, ex3.ToString());
                     ProjectData.ClearProjectError();
                 }
                 finally
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs_Lock.ReleaseReaderLock();
+                    worldState.CharactersLock.ExitReadLock();
                 }
             }
             catch (ApplicationException ex5)
             {
                 ProjectData.SetProjectError(ex5);
                 var ex2 = ex5;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Update: Weather Manager timed out");
+                logger.LogWarning("Update: Weather Manager timed out");
                 ProjectData.ClearProjectError();
             }
             catch (Exception ex6)
             {
                 ProjectData.SetProjectError(ex6);
                 var ex = ex6;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Error updating Weather.{0}{1}", Environment.NewLine, ex.ToString());
+                logger.LogCritical("Error updating Weather.{0}{1}", Environment.NewLine, ex.ToString());
                 ProjectData.ClearProjectError();
             }
+
             SMSG_WEATHER.Dispose();
         }
     }

@@ -18,7 +18,17 @@
 
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Spell;
+using Mangos.Common.Globals;
+using Mangos.Configuration;
+using Mangos.World.DataStores;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
+using Mangos.World.Network;
+using Mangos.World.Objects.Factories;
 using Mangos.World.Player;
+using Mangos.World.Services;
+using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 
 namespace Mangos.World.Objects;
@@ -31,8 +41,26 @@ public class WS_Totems
 
         public int Duration;
 
-        public TotemObject(int Entry, float PosX, float PosY, float PosZ, float Orientation, int Map, int Duration_ = 0)
-            : base(Entry, PosX, PosY, PosZ, Orientation, Map, Duration_)
+        public TotemObject(
+            ILogger<TotemObject> logger,
+            WorldState worldState,
+            MangosConfiguration configuration,
+            WS_DBCDatabase database,
+            WS_Maps maps,
+            WS_Creatures creatures,
+            WS_Combat combat,
+            WS_Loot loot,
+            IMapTileLoader tileLoader,
+            WS_Network network,
+            CreatureInfoFactory creatureInfoFactory,
+            int Entry,
+            float PosX,
+            float PosY,
+            float PosZ,
+            float Orientation,
+            int Map,
+            int Duration_ = 0)
+        : base(logger, null, worldState, configuration, database, maps, creatures, combat, loot, network, tileLoader, lootObjectFactory: null, creatureInfoFactory: creatureInfoFactory, baseActiveSpellFactory: null, spellTargetsFactory: null, castSpellParametersFactory: null, updateClassFactory: null, critterAiFactory: null, defaultAiFactory: null, guardAiFactory: null, guardWaypointAiFactory: null, petAiFactory: null, standStillAiFactory: null, waypointAiFactory: null, ID_: Entry, PosX: PosX, PosY: PosY, PosZ: PosZ, Orientation_: Orientation, Map: Map, Duration: Duration_)
         {
             Caster = null;
             Duration = 0;
@@ -50,18 +78,18 @@ public class WS_Totems
         {
             checked
             {
-                var num = WorldServiceLocator.GlobalConstants.MAX_AURA_EFFECTs - 1;
+                var num = MangosGlobalConstants.MAX_AURA_EFFECTs - 1;
                 for (var i = 0; i <= num; i++)
                 {
                     if (ActiveSpells[i] == null)
                     {
                         continue;
                     }
-                    if (ActiveSpells[i].SpellDuration == WorldServiceLocator.GlobalConstants.SPELL_DURATION_INFINITE)
+                    if (ActiveSpells[i].SpellDuration == MangosGlobalConstants.SPELL_DURATION_INFINITE)
                     {
                         ActiveSpells[i].SpellDuration = Duration;
                     }
-                    if (ActiveSpells[i].SpellDuration != WorldServiceLocator.GlobalConstants.SPELL_DURATION_INFINITE)
+                    if (ActiveSpells[i].SpellDuration != MangosGlobalConstants.SPELL_DURATION_INFINITE)
                     {
                         ActiveSpells[i].SpellDuration -= 1000;
                         byte k = 0;
@@ -79,7 +107,7 @@ public class WS_Totems
                             k = (byte)unchecked((uint)(k + 1));
                         }
                         while (k <= 2u);
-                        if (ActiveSpells[i] != null && ActiveSpells[i].SpellDuration <= 0 && ActiveSpells[i].SpellDuration != WorldServiceLocator.GlobalConstants.SPELL_DURATION_INFINITE)
+                        if (ActiveSpells[i] != null && ActiveSpells[i].SpellDuration <= 0 && ActiveSpells[i].SpellDuration != MangosGlobalConstants.SPELL_DURATION_INFINITE)
                         {
                             RemoveAura(i, ref ActiveSpells[i].SpellCaster, RemovedByDuration: true);
                         }
@@ -92,17 +120,17 @@ public class WS_Totems
                             List<WS_Base.BaseUnit> Targets = new();
                             switch (Caster)
                             {
-                                case WS_PlayerData.CharacterObject _:
+                                case CharacterObject _:
                                     {
-                                        var wS_Spells = WorldServiceLocator.WSSpells;
-                                        WS_PlayerData.CharacterObject objCharacter = (WS_PlayerData.CharacterObject)Caster;
+                                        var wS_Spells = spells;
+                                        CharacterObject objCharacter = (CharacterObject)Caster;
                                         Targets = wS_Spells.GetPartyMembersAtPoint(ref objCharacter, ActiveSpells[i].Aura_Info[j].GetRadius, positionX, positionY, positionZ);
                                         break;
                                     }
 
                                 default:
                                     {
-                                        var wS_Spells2 = WorldServiceLocator.WSSpells;
+                                        var wS_Spells2 = spells;
                                         WS_Base.BaseUnit Target = this;
                                         Targets = wS_Spells2.GetFriendAroundMe(ref Target, ActiveSpells[i].Aura_Info[j].GetRadius);
                                         break;
@@ -113,7 +141,7 @@ public class WS_Totems
                                 var Unit = item;
                                 if (!Unit.HaveAura(ActiveSpells[i].SpellID))
                                 {
-                                    var wS_Spells3 = WorldServiceLocator.WSSpells;
+                                    var wS_Spells3 = spells;
                                     WS_Base.BaseObject baseObject = this;
                                     wS_Spells3.ApplyAura(ref Unit, ref baseObject, ref ActiveSpells[i].Aura_Info[j], ActiveSpells[i].SpellID);
                                 }

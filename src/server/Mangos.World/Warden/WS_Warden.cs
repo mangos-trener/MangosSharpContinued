@@ -29,9 +29,9 @@ public partial class WS_Warden
 {
     public WardenMaiev Maiev;
 
-    public WS_Warden()
+    public WS_Warden(WardenMaiev maiev)
     {
-        Maiev = new WardenMaiev();
+        Maiev = maiev;
     }
 
     private int VarPtr(ref object obj)
@@ -64,7 +64,7 @@ public partial class WS_Warden
         Marshal.FreeHGlobal(new IntPtr(tmpHandle));
     }
 
-    public void SendWardenPacket(ref WS_PlayerData.CharacterObject objCharacter, ref Packets.PacketClass Packet)
+    public void SendWardenPacket(ref CharacterObject objCharacter, ref Packets.PacketClass Packet)
     {
         var b = new byte[checked(Packet.Data.Length - 4 - 1 + 1)];
         Buffer.BlockCopy(Packet.Data, 4, b, 0, b.Length);

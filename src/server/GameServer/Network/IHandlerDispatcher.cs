@@ -22,5 +22,5 @@ internal interface IHandlerDispatcher
 {
     Opcodes Opcode { get; }
 
-    Task<HandlerResult> ExectueAsync(PacketReader reader);
+    Task<HandlerResult> ExecuteAsync(PacketReader reader);
 }

@@ -28,30 +28,30 @@ public partial class WS_Battlegrounds
 {
     public class Battlefield : IDisposable
     {
-        public List<WS_PlayerData.CharacterObject> MembersTeam1;
-
-        public List<WS_PlayerData.CharacterObject> MembersTeam2;
-
+        public List<CharacterObject> MembersTeam1;
+        public List<CharacterObject> MembersTeam2;
         public int ID;
-
         public uint Map;
-
         public BattlefieldMapType MapType;
-
         private bool _disposedValue;
 
-        public Battlefield(BattlefieldMapType rMapType, uint rMap)
+        // DI
+        private readonly WS_Battlegrounds WSBattlegrounds;
+
+        public Battlefield(BattlefieldMapType rMapType, uint rMap, WS_Battlegrounds battlegrounds)
         {
-            MembersTeam1 = new List<WS_PlayerData.CharacterObject>();
-            MembersTeam2 = new List<WS_PlayerData.CharacterObject>();
-            WorldServiceLocator.WSBattlegrounds.BATTLEFIELDs.Add(ID, this);
+            WSBattlegrounds = battlegrounds;
+
+            MembersTeam1 = new List<CharacterObject>();
+            MembersTeam2 = new List<CharacterObject>();
+            WSBattlegrounds.BATTLEFIELDs.Add(ID, this);
         }
 
         protected virtual void Dispose(bool disposing)
         {
             if (!_disposedValue)
             {
-                WorldServiceLocator.WSBattlegrounds.BATTLEFIELDs.Remove(ID);
+                WSBattlegrounds.BATTLEFIELDs.Remove(ID);
             }
             _disposedValue = true;
         }

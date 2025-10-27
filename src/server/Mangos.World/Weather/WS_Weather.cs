@@ -25,14 +25,14 @@ namespace Mangos.World.Weather;
 
 public partial class WS_Weather
 {
-    public Dictionary<int, WeatherZone> WeatherZones;
+    public static Dictionary<int, WeatherZone> WeatherZones;
 
     public WS_Weather()
     {
         WeatherZones = new Dictionary<int, WeatherZone>();
     }
 
-    public void SendWeather(int ZoneID, ref WS_Network.ClientClass client)
+    public static void SendWeather(int ZoneID, ref WS_Network.ClientClass client)
     {
         if (WeatherZones.ContainsKey(ZoneID))
         {

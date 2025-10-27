@@ -16,10 +16,11 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Gossip;
+using Mangos.Common.Globals;
 using Mangos.World.Objects;
 using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 
 namespace Mangos.World.Gossip;
@@ -28,9 +29,18 @@ public class WS_GuardGossip
 {
     public class TGuardTalk : TBaseTalk
     {
-        public override void OnGossipHello(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private readonly ILogger<TGuardTalk> logger;
+        private readonly WorldState worldState;
+
+        public TGuardTalk(ILogger<TGuardTalk> logger, WorldState worldState)
         {
-            var Gossip = GetGossip(WorldServiceLocator.WorldServer.WORLD_CREATUREs[cGUID].ID);
+            this.logger = logger;
+            this.worldState = worldState;
+        }
+
+        public override void OnGossipHello(ref CharacterObject objCharacter, ulong cGUID)
+        {
+            var Gossip = GetGossip(worldState.WorldCreatures[cGUID].ID);
             switch (Gossip)
             {
                 case Gossips.Darnassus:
@@ -82,14 +92,14 @@ public class WS_GuardGossip
                     break;
 
                 default:
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Unknown gossip [{0}].", Gossip);
+                    logger.LogCritical("Unknown gossip [{0}].", Gossip);
                     break;
             }
         }
 
-        public override void OnGossipSelect(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int selected)
+        public override void OnGossipSelect(ref CharacterObject objCharacter, ulong cGUID, int selected)
         {
-            var Gossip = GetGossip(WorldServiceLocator.WorldServer.WORLD_CREATUREs[cGUID].ID);
+            var Gossip = GetGossip(worldState.WorldCreatures[cGUID].ID);
             switch (Gossip)
             {
                 case Gossips.Darnassus:
@@ -141,7 +151,7 @@ public class WS_GuardGossip
                     break;
 
                 default:
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Unknown gossip [{0}].", Gossip);
+                    logger.LogCritical("Unknown gossip [{0}].", Gossip);
                     break;
             }
         }
@@ -193,28 +203,28 @@ public class WS_GuardGossip
                     return Gossips.Tirisfall;
 
                 default:
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Creature Entry [{0}] was not found in guard table.", Entry);
+                    logger.LogDebug("Creature Entry [{0}] was not found in guard table.", Entry);
                     return Gossips.Thunderbluff;
             }
         }
 
-        private void OnGossipHello_Stormwind(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Stormwind(ref CharacterObject objCharacter, ulong cGUID)
         {
             objCharacter.TalkMenuTypes.Clear();
             GossipMenu npcMenu = new();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STORMWIND_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DEEPRUNTRAM);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GRYPHON);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAILBOX);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_OFFICERS);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STORMWIND_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DEEPRUNTRAM);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GRYPHON);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAILBOX);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_OFFICERS);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -227,7 +237,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 933, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Stormwind(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Stormwind(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -316,9 +326,9 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu3 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARSONGULCH);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARSONGULCH);
                     objCharacter.TalkMenuTypes.Add(14);
                     objCharacter.TalkMenuTypes.Add(15);
                     objCharacter.TalkMenuTypes.Add(16);
@@ -330,14 +340,14 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DRUID);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PALADIN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DRUID);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PALADIN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
                     var j = 17;
                     do
                     {
@@ -353,18 +363,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 25;
                     do
                     {
@@ -563,23 +573,23 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Orgrimmar(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Orgrimmar(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WINDRIDER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAILBOX);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ZEPPLINMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_OFFICERS);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WINDRIDER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAILBOX);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ZEPPLINMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_OFFICERS);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -592,7 +602,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 2593, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Orgrimmar(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Orgrimmar(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -681,9 +691,9 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu3 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARSONGULCH);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARSONGULCH);
                     objCharacter.TalkMenuTypes.Add(14);
                     objCharacter.TalkMenuTypes.Add(15);
                     objCharacter.TalkMenuTypes.Add(16);
@@ -695,13 +705,13 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SHAMAN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SHAMAN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 17;
                     do
                     {
@@ -717,18 +727,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 24;
                     do
                     {
@@ -919,21 +929,21 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Thunderbluff(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Thunderbluff(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WINDRIDER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAILBOX);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WINDRIDER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAILBOX);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -946,7 +956,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 3543, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Thunderbluff(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Thunderbluff(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -993,7 +1003,7 @@ public class WS_GuardGossip
                 }
                 else if (Operators.ConditionalCompareObjectEqual(left, 6, TextCompare: false))
                 {
-                    objCharacter.SendPointOfInterest(1381.77f, -4371.16f, 6, 6, 0, WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
+                    objCharacter.SendPointOfInterest(1381.77f, -4371.16f, 6, 6, 0, MangosGlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
                     var obj6 = objCharacter;
                     GossipMenu Menu = null;
                     QuestMenu qMenu = null;
@@ -1019,9 +1029,9 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu3 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARSONGULCH);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARSONGULCH);
                     objCharacter.TalkMenuTypes.Add(12);
                     objCharacter.TalkMenuTypes.Add(13);
                     objCharacter.TalkMenuTypes.Add(14);
@@ -1033,12 +1043,12 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DRUID);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SHAMAN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DRUID);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SHAMAN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 15;
                     do
                     {
@@ -1054,17 +1064,17 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 21;
                     do
                     {
@@ -1239,21 +1249,21 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Darnassus(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Darnassus(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HIPPOGRYPH);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAILBOX);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HIPPOGRYPH);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAILBOX);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -1266,7 +1276,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 3543, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Darnassus(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Darnassus(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -1339,9 +1349,9 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu3 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARSONGULCH);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARSONGULCH);
                     objCharacter.TalkMenuTypes.Add(12);
                     objCharacter.TalkMenuTypes.Add(13);
                     objCharacter.TalkMenuTypes.Add(14);
@@ -1353,11 +1363,11 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DRUID);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DRUID);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 15;
                     do
                     {
@@ -1373,15 +1383,15 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 20;
                     do
                     {
@@ -1532,22 +1542,22 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Ironforge(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Ironforge(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_IRONFORGE_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DEEPRUNTRAM);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GRYPHON);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAILBOX);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_IRONFORGE_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DEEPRUNTRAM);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GRYPHON);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAILBOX);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -1560,7 +1570,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 933, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Ironforge(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Ironforge(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -1641,9 +1651,9 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu3 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARSONGULCH);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARSONGULCH);
                     objCharacter.TalkMenuTypes.Add(13);
                     objCharacter.TalkMenuTypes.Add(14);
                     objCharacter.TalkMenuTypes.Add(15);
@@ -1655,13 +1665,13 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PALADIN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PALADIN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 16;
                     do
                     {
@@ -1677,18 +1687,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 23;
                     do
                     {
@@ -1879,22 +1889,22 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Undercity(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Undercity(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATHANDLER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAILBOX);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ZEPPLINMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATHANDLER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAILBOX);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_AUCTIONHOUSE);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ZEPPLINMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WEAPONMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATTLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -1907,7 +1917,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 3543, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Undercity(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Undercity(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -1988,9 +1998,9 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu3 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
-                    npcMenu3.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARSONGULCH);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALTERACVALLEY);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ARATHIBASIN);
+                    npcMenu3.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARSONGULCH);
                     objCharacter.TalkMenuTypes.Add(13);
                     objCharacter.TalkMenuTypes.Add(14);
                     objCharacter.TalkMenuTypes.Add(15);
@@ -2002,11 +2012,11 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 16;
                     do
                     {
@@ -2022,18 +2032,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 21;
                     do
                     {
@@ -2208,16 +2218,16 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Mulgore(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Mulgore(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WINDRIDER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WINDRIDER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -2230,7 +2240,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 3543, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Mulgore(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Mulgore(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -2269,10 +2279,10 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DRUID);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SHAMAN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DRUID);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SHAMAN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 7;
                     do
                     {
@@ -2288,17 +2298,17 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 11;
                     do
                     {
@@ -2427,16 +2437,16 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Durotar(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Durotar(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WINDRIDER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WINDRIDER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -2449,7 +2459,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 4037, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Durotar(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Durotar(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -2488,13 +2498,13 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SHAMAN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SHAMAN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 7;
                     do
                     {
@@ -2510,18 +2520,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 14;
                     do
                     {
@@ -2683,17 +2693,17 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_ElwynnForest(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_ElwynnForest(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GRYPHON);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GRYPHON);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -2706,7 +2716,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 933, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_ElwynnForest(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_ElwynnForest(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -2752,14 +2762,14 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DRUID);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PALADIN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DRUID);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PALADIN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 8;
                     do
                     {
@@ -2775,18 +2785,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 16;
                     do
                     {
@@ -2956,17 +2966,17 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_DunMorogh(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_DunMorogh(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HIPPOGRYPH);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HIPPOGRYPH);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -2979,7 +2989,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 4287, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_DunMorogh(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_DunMorogh(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -3025,13 +3035,13 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PALADIN);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PALADIN);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 8;
                     do
                     {
@@ -3047,18 +3057,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 15;
                     do
                     {
@@ -3219,16 +3229,16 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Tirisfall(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Tirisfall(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BATHANDLER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BATHANDLER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -3241,7 +3251,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 4097, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Tirisfall(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Tirisfall(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -3280,11 +3290,11 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MAGE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARLOCK);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MAGE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARLOCK);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 7;
                     do
                     {
@@ -3300,18 +3310,18 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENGINEERING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_MINING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BLACKSMITHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENGINEERING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_MINING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 12;
                     do
                     {
@@ -3458,17 +3468,17 @@ public class WS_GuardGossip
             }
         }
 
-        private void OnGossipHello_Teldrassil(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID)
+        private void OnGossipHello_Teldrassil(ref CharacterObject objCharacter, ulong cGUID)
         {
             GossipMenu npcMenu = new();
             objCharacter.TalkMenuTypes.Clear();
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_BANK);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FERRY);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_GUILDMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_INN);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_STABLEMASTER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
-            npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PROFTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_BANK);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FERRY);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_GUILDMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_INN);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_STABLEMASTER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_CLASSTRAINER);
+            npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PROFTRAINER);
             var i = 1;
             do
             {
@@ -3481,7 +3491,7 @@ public class WS_GuardGossip
             obj.SendGossip(cGUID, 4316, npcMenu, qMenu);
         }
 
-        private void OnGossipSelect_Teldrassil(ref WS_PlayerData.CharacterObject objCharacter, ulong cGUID, int Selected)
+        private void OnGossipSelect_Teldrassil(ref CharacterObject objCharacter, ulong cGUID, int Selected)
         {
             var left = objCharacter.TalkMenuTypes[Selected];
             checked
@@ -3527,11 +3537,11 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu2 = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_DRUID);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HUNTER);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_PRIEST);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ROGUE);
-                    npcMenu2.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_WARRIOR);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_DRUID);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HUNTER);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_PRIEST);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ROGUE);
+                    npcMenu2.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_WARRIOR);
                     var j = 8;
                     do
                     {
@@ -3547,15 +3557,15 @@ public class WS_GuardGossip
                 {
                     GossipMenu npcMenu = new();
                     objCharacter.TalkMenuTypes.Clear();
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ALCHEMY);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_COOKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_ENCHANTING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FIRSTAID);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_FISHING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_HERBALISM);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_SKINNING);
-                    npcMenu.AddMenu(WorldServiceLocator.GlobalConstants.GOSSIP_TEXT_TAILORING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ALCHEMY);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_COOKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_ENCHANTING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FIRSTAID);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_FISHING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_HERBALISM);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_LEATHERWORKING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_SKINNING);
+                    npcMenu.AddMenu(MangosGlobalConstants.GOSSIP_TEXT_TAILORING);
                     var i = 13;
                     do
                     {

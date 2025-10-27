@@ -16,7 +16,9 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
+using Mangos.Common.Globals;
+using Mangos.World.Weather;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Threading;
 
@@ -33,27 +35,31 @@ public partial class WS_TimerBasedEvents
         public int UPDATE_TIMER;
 
         private bool _disposedValue;
+        private readonly ILogger<TWeatherChanger> logger;
 
-        public TWeatherChanger()
+        public TWeatherChanger(ILogger<TWeatherChanger> logger)
         {
             WeatherTimer = null;
             WeatherWorking = false;
-            UPDATE_TIMER = WorldServiceLocator.MangosConfiguration.World.WeatherTimer;
+            UPDATE_TIMER = MangosGlobalConstants.WeatherTimer;
             WeatherTimer = new Timer(Update, null, 10000, UPDATE_TIMER);
+            this.logger = logger;
         }
 
         private void Update(object state)
         {
             if (WeatherWorking)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Update: Weather changer skipping update");
+                logger.LogWarning("Update: Weather changer skipping update");
                 return;
             }
+
             WeatherWorking = true;
-            foreach (var weatherZone in WorldServiceLocator.WSWeather.WeatherZones)
+            foreach (var weatherZone in WS_Weather.WeatherZones)
             {
                 weatherZone.Value.Update();
             }
+
             WeatherWorking = false;
         }
 

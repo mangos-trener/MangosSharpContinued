@@ -20,11 +20,16 @@ using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Item;
 using Mangos.Common.Enums.Player;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Globals;
 using Mangos.World.Globals;
 using Mangos.World.Network;
 using Mangos.World.Objects;
+using Mangos.World.Objects.Factories;
+using Mangos.World.Objects.Factories.Spells;
 using Mangos.World.Player;
 using Mangos.World.Spells;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
@@ -35,6 +40,19 @@ namespace Mangos.World.Handlers;
 
 public class WS_Combat
 {
+    private readonly ILogger<WS_Combat> logger;
+    private readonly WorldState worldState;
+    private readonly CharManagementHandler charManagementHandler;
+    private readonly ItemInfoFactory itemInfoFactory;
+
+    public WS_Combat(ILogger<WS_Combat> logger, WorldState worldState, CharManagementHandler charManagementHandler, ItemInfoFactory itemInfoFactory)
+    {
+        this.logger = logger;
+        this.worldState = worldState;
+        this.charManagementHandler = charManagementHandler;
+        this.itemInfoFactory = itemInfoFactory;
+    }
+
     public struct DamageInfo
     {
         public int Damage;
@@ -63,8 +81,12 @@ public class WS_Combat
         private Timer NextAttackTimer;
 
         public WS_Base.BaseUnit Victim;
-
-        public WS_PlayerData.CharacterObject Character;
+        private readonly ILogger<TAttackTimer> logger;
+        private readonly WS_Combat combat;
+        private readonly WS_Spells spells;
+        private readonly SpellTargetsFactory spellTargetsFactory;
+        private readonly CastSpellParametersFactory castSpellParametersFactory;
+        public CharacterObject Character;
 
         public float combatReach;
 
@@ -107,7 +129,7 @@ public class WS_Combat
             Dispose();
         }
 
-        public TAttackTimer(ref WS_Base.BaseObject Victim_, ref WS_PlayerData.CharacterObject Character_)
+        public TAttackTimer(ILogger<TAttackTimer> logger, WS_Combat combat, WS_Spells spells, SpellTargetsFactory spellTargetsFactory, CastSpellParametersFactory castSpellParametersFactory, ItemInfoFactory itemInfoFactory, ref WS_Base.BaseObject Victim_, ref CharacterObject Character_)
         {
             LastAttack = 0;
             NextAttackTimer = null;
@@ -119,10 +141,15 @@ public class WS_Combat
             combatNextAttackSpell = false;
             NextAttackTimer = new Timer(DoAttack, null, 1000, -1);
             Victim = (WS_Base.BaseUnit)Victim_;
+            this.logger = logger;
+            this.combat = combat;
+            this.spells = spells;
+            this.spellTargetsFactory = spellTargetsFactory;
+            this.castSpellParametersFactory = castSpellParametersFactory;
             Character = Character_;
         }
 
-        public TAttackTimer(ref WS_PlayerData.CharacterObject Character_)
+        public TAttackTimer(ILogger<TAttackTimer> logger, WS_Combat combat, WS_Spells spells, SpellTargetsFactory spellTargetsFactory, CastSpellParametersFactory castSpellParametersFactory, ItemInfoFactory itemInfoFactory, ref CharacterObject Character_)
         {
             LastAttack = 0;
             NextAttackTimer = null;
@@ -133,6 +160,11 @@ public class WS_Combat
             combatNextAttack = new AutoResetEvent(initialState: false);
             combatNextAttackSpell = false;
             NextAttackTimer = new Timer(DoAttack, null, -1, -1);
+            this.logger = logger;
+            this.combat = combat;
+            this.spells = spells;
+            this.spellTargetsFactory = spellTargetsFactory;
+            this.castSpellParametersFactory = castSpellParametersFactory;
             Character = Character_;
             Victim = null;
         }
@@ -161,24 +193,24 @@ public class WS_Combat
                 {
                     return;
                 }
-                WorldServiceLocator.WSCombat.SendAttackStop(Character.GUID, Victim.GUID, ref Character.client);
+                combat.SendAttackStop(Character.GUID, Victim.GUID, ref Character.client);
                 Victim = Victim_;
                 combatReach = 2f + Victim.BoundingRadius + Character.CombatReach;
                 minRanged = Victim.BoundingRadius + 8f;
             }
-            var wS_Combat = WorldServiceLocator.WSCombat;
+            var wS_Combat = combat;
             ref var character = ref Character;
             var flag = false;
             var AttackSpeed = wS_Combat.GetAttackTime(ref character, ref flag);
             checked
             {
-                if (WorldServiceLocator.NativeMethods.timeGetTime("") - LastAttack >= AttackSpeed)
+                if (LegacyNativeMethods.TimeGetTime("") - LastAttack >= AttackSpeed)
                 {
                     DoAttack(null);
                 }
                 else
                 {
-                    NextAttackTimer.Change(WorldServiceLocator.NativeMethods.timeGetTime("") - LastAttack, -1);
+                    NextAttackTimer.Change(LegacyNativeMethods.TimeGetTime("") - LastAttack, -1);
                 }
             }
         }
@@ -191,7 +223,7 @@ public class WS_Combat
                 AttackStop();
                 return;
             }
-            LastAttack = WorldServiceLocator.NativeMethods.timeGetTime("");
+            LastAttack = LegacyNativeMethods.TimeGetTime("");
             Character.RemoveAurasByInterruptFlag(4096);
             try
             {
@@ -208,7 +240,7 @@ public class WS_Combat
             {
                 ProjectData.SetProjectError(ex2);
                 var ex = ex2;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.CRITICAL, "Error doing attack.{0}{1}", Environment.NewLine, ex.ToString());
+                logger.LogCritical("Error doing attack.{0}{1}", Environment.NewLine, ex.ToString());
                 ProjectData.ClearProjectError();
             }
         }
@@ -231,9 +263,9 @@ public class WS_Combat
                     bool flag;
                     if (Character.spellCasted[1] != null && !Character.spellCasted[1].Finished)
                     {
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "AttackStop: Casting Spell");
+                        logger.LogDebug("AttackStop: Casting Spell");
                         var nextAttackTimer = NextAttackTimer;
-                        var wS_Combat = WorldServiceLocator.WSCombat;
+                        var wS_Combat = combat;
                         ref var character = ref Character;
                         flag = false;
                         nextAttackTimer.Change(wS_Combat.GetAttackTime(ref character, ref flag), -1);
@@ -273,7 +305,7 @@ public class WS_Combat
                     var tmpPosX = Victim.positionX;
                     var tmpPosY = Victim.positionY;
                     var tmpPosZ = Victim.positionZ;
-                    var tmpDist = WorldServiceLocator.WSCombat.GetDistance(Character, tmpPosX, tmpPosY, tmpPosZ);
+                    var tmpDist = WS_Combat.GetDistance(Character, tmpPosX, tmpPosY, tmpPosZ);
                     if (tmpDist > 8f + Victim.CombatReach)
                     {
                         if (Character.CanShootRanged)
@@ -296,11 +328,11 @@ public class WS_Combat
                         SMSG_ATTACKSWING_NOTINRANGE.Dispose();
                         return;
                     }
-                    var wS_Combat2 = WorldServiceLocator.WSCombat;
+                    var wS_Combat2 = combat;
                     ref var character2 = ref Character;
                     WS_Base.BaseObject Object = character2;
                     flag = wS_Combat2.IsInFrontOf(ref Object, tmpPosX, tmpPosY);
-                    character2 = (WS_PlayerData.CharacterObject)Object;
+                    character2 = (CharacterObject)Object;
                     if (!flag)
                     {
                         NextAttackTimer.Change(2000, -1);
@@ -321,7 +353,7 @@ public class WS_Combat
                         combatNextAttack.Set();
                         combatNextAttackSpell = false;
                     }
-                    var NextAttack = WorldServiceLocator.WSCombat.GetAttackTime(ref Character, ref combatDualWield);
+                    var NextAttack = combat.GetAttackTime(ref Character, ref combatDualWield);
                     if (HaveMainHand && HaveOffHand)
                     {
                         if (combatDualWield)
@@ -373,7 +405,7 @@ public class WS_Combat
                         SMSG_ATTACKSWING_CANT_ATTACK.Dispose();
                     }
                     AttackStop();
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Error while doing melee attack.{0}", Environment.NewLine + e);
+                    logger.LogDebug("Error while doing melee attack.{0}", Environment.NewLine + e);
                     ProjectData.ClearProjectError();
                 }
             }
@@ -391,9 +423,9 @@ public class WS_Combat
             bool flag;
             if (Character.spellCasted[1] != null && !Character.spellCasted[1].Finished)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "AttackPause: Casting Spell");
+                logger.LogDebug("AttackPause: Casting Spell");
                 var nextAttackTimer = NextAttackTimer;
-                var wS_Combat = WorldServiceLocator.WSCombat;
+                var wS_Combat = combat;
                 ref var character = ref Character;
                 flag = false;
                 nextAttackTimer.Change(wS_Combat.GetAttackTime(ref character, ref flag), -1);
@@ -426,7 +458,7 @@ public class WS_Combat
                 AttackStop();
                 return;
             }
-            var tmpDist = WorldServiceLocator.WSCombat.GetDistance(Character, tmpPosX, tmpPosY, tmpPosZ);
+            var tmpDist = WS_Combat.GetDistance(Character, tmpPosX, tmpPosY, tmpPosZ);
             if (tmpDist < combatReach)
             {
                 Ranged = false;
@@ -441,11 +473,11 @@ public class WS_Combat
                 SMSG_ATTACKSWING_NOTINRANGE.Dispose();
                 return;
             }
-            var wS_Combat2 = WorldServiceLocator.WSCombat;
+            var wS_Combat2 = combat;
             ref var character2 = ref Character;
             WS_Base.BaseObject Object = character2;
             flag = wS_Combat2.IsInFrontOf(ref Object, tmpPosX, tmpPosY);
-            character2 = (WS_PlayerData.CharacterObject)Object;
+            character2 = (CharacterObject)Object;
             if (!flag)
             {
                 NextAttackTimer.Change(2000, -1);
@@ -457,7 +489,7 @@ public class WS_Combat
             {
                 DoRangedDamage();
                 var nextAttackTimer2 = NextAttackTimer;
-                var wS_Combat3 = WorldServiceLocator.WSCombat;
+                var wS_Combat3 = combat;
                 ref var character3 = ref Character;
                 flag = false;
                 nextAttackTimer2.Change(wS_Combat3.GetAttackTime(ref character3, ref flag), -1);
@@ -466,14 +498,14 @@ public class WS_Combat
 
         public void DoMeleeDamage()
         {
-            var wS_Combat = WorldServiceLocator.WSCombat;
+            var wS_Combat = combat;
             ref var character = ref Character;
             ref var reference = ref character;
             WS_Base.BaseUnit Attacker = character;
             var damageInfo2 = wS_Combat.CalculateDamage(ref Attacker, ref Victim, combatDualWield, Ranged: false);
-            reference = (WS_PlayerData.CharacterObject)Attacker;
+            reference = (CharacterObject)Attacker;
             var damageInfo = damageInfo2;
-            var wS_Combat2 = WorldServiceLocator.WSCombat;
+            var wS_Combat2 = combat;
             ref var character2 = ref Character;
             reference = ref character2;
             WS_Base.BaseObject Attacker2 = character2;
@@ -482,17 +514,17 @@ public class WS_Combat
             WS_Base.BaseObject baseObject = victim;
             wS_Combat2.SendAttackerStateUpdate(ref Attacker2, ref baseObject, damageInfo, Character.client);
             reference2 = (WS_Base.BaseUnit)baseObject;
-            reference = (WS_PlayerData.CharacterObject)Attacker2;
-            WS_Spells.SpellTargets Target = new();
+            reference = (CharacterObject)Attacker2;
+            var Target = spellTargetsFactory.Create();
             var spellTargets = Target;
             ref var character3 = ref Character;
             reference = ref character3;
             Attacker = character3;
             spellTargets.SetTarget_UNIT(ref Attacker);
-            reference = (WS_PlayerData.CharacterObject)Attacker;
+            reference = (CharacterObject)Attacker;
             checked
             {
-                var b = (byte)(WorldServiceLocator.GlobalConstants.MAX_AURA_EFFECTs_VISIBLE - 1);
+                var b = (byte)(MangosGlobalConstants.MAX_AURA_EFFECTs_VISIBLE - 1);
                 byte i = 0;
                 while (i <= (uint)b)
                 {
@@ -501,12 +533,12 @@ public class WS_Combat
                         byte j = 0;
                         do
                         {
-                            if (Victim.ActiveSpells[i].Aura_Info[j] != null && Victim.ActiveSpells[i].Aura_Info[j].ApplyAuraIndex == 42 && WorldServiceLocator.Functions.RollChance(Victim.ActiveSpells[i].GetSpellInfo.procChance))
+                            if (Victim.ActiveSpells[i].Aura_Info[j] != null && Victim.ActiveSpells[i].Aura_Info[j].ApplyAuraIndex == 42 && Globals.Functions.RollChance(Victim.ActiveSpells[i].GetSpellInfo.procChance))
                             {
                                 ref var victim2 = ref Victim;
                                 reference2 = ref victim2;
                                 baseObject = victim2;
-                                WS_Spells.CastSpellParameters castSpellParameters = new(ref Target, ref baseObject, Victim.ActiveSpells[i].Aura_Info[j].TriggerSpell, Instant: true);
+                                var castSpellParameters = castSpellParametersFactory.Create(ref Target, ref baseObject, Victim.ActiveSpells[i].Aura_Info[j].TriggerSpell, true);
                                 reference2 = (WS_Base.BaseUnit)baseObject;
                                 var castParams = castSpellParameters;
                                 castParams.Cast(null);
@@ -519,7 +551,7 @@ public class WS_Combat
                 }
                 if (Character.Classe == Classes.CLASS_WARRIOR || (Character.Classe == Classes.CLASS_DRUID && (Character.ShapeshiftForm == ShapeshiftForm.FORM_BEAR || Character.ShapeshiftForm == ShapeshiftForm.FORM_DIREBEAR)))
                 {
-                    Character.Rage.Increment((int)(((7.5 * damageInfo.Damage / Character.GetRageConversion) + (Character.GetHitFactor((damageInfo.HitInfo & 4) == 0, (damageInfo.HitInfo & 0x200) != 0) * WorldServiceLocator.WSCombat.GetAttackTime(ref Character, ref combatDualWield))) / 2.0));
+                    Character.Rage.Increment((int)(((7.5 * damageInfo.Damage / Character.GetRageConversion) + (Character.GetHitFactor((damageInfo.HitInfo & 4) == 0, (damageInfo.HitInfo & 0x200) != 0) * combat.GetAttackTime(ref Character, ref combatDualWield))) / 2.0));
                     Character.SetUpdateFlag(24, Character.Rage.Current);
                     Character.SendCharacterUpdate();
                 }
@@ -529,7 +561,7 @@ public class WS_Combat
                 reference = ref character4;
                 Attacker = character4;
                 victim3.DealDamage(getDamage, Attacker);
-                reference = (WS_PlayerData.CharacterObject)Attacker;
+                reference = (CharacterObject)Attacker;
                 if (Victim == null || Victim.IsDead)
                 {
                     AttackStop();
@@ -539,25 +571,25 @@ public class WS_Combat
 
         public void DoRangedDamage()
         {
-            WS_Spells.SpellTargets Targets = new();
+            var Targets = spellTargetsFactory.Create();
             Targets.SetTarget_UNIT(ref Victim);
             var SpellID = (Character.AutoShotSpell <= 0) ? 75 : Character.AutoShotSpell;
             ref var character = ref Character;
             WS_Base.BaseObject Caster = character;
-            WS_Spells.CastSpellParameters castSpellParameters = new(ref Targets, ref Caster, SpellID, Instant: true);
-            character = (WS_PlayerData.CharacterObject)Caster;
+            var castSpellParameters = castSpellParametersFactory.Create(ref Targets, ref Caster, SpellID, true);
+            character = (CharacterObject)Caster;
             var tmpSpell = castSpellParameters;
             ThreadPool.QueueUserWorkItem(tmpSpell.Cast);
         }
 
-        public void DoMeleeDamageBySpell(ref WS_PlayerData.CharacterObject Character, ref WS_Base.BaseObject Victim2, int BonusDamage, int SpellID)
+        public void DoMeleeDamageBySpell(ref CharacterObject Character, ref WS_Base.BaseObject Victim2, int BonusDamage, int SpellID)
         {
-            var wS_Combat = WorldServiceLocator.WSCombat;
+            var wS_Combat = combat;
             WS_Base.BaseUnit Attacker = Character;
             WS_Base.BaseUnit baseUnit = (WS_Base.BaseUnit)Victim2;
-            var damageInfo2 = wS_Combat.CalculateDamage(ref Attacker, ref baseUnit, DualWield: false, Ranged: false, WorldServiceLocator.WSSpells.SPELLs[SpellID]);
+            var damageInfo2 = wS_Combat.CalculateDamage(ref Attacker, ref baseUnit, DualWield: false, Ranged: false, WS_Spells.SPELLs[SpellID]);
             Victim2 = baseUnit;
-            Character = (WS_PlayerData.CharacterObject)Attacker;
+            Character = (CharacterObject)Attacker;
             var damageInfo = damageInfo2;
             var IsCrit = false;
             checked
@@ -571,33 +603,33 @@ public class WS_Combat
                     damageInfo.Damage += BonusDamage;
                     IsCrit = true;
                 }
-                var wS_Spells = WorldServiceLocator.WSSpells;
+                var wS_Spells = spells;
                 baseUnit = Character;
                 Attacker = (WS_Base.BaseUnit)Victim2;
                 wS_Spells.SendNonMeleeDamageLog(ref baseUnit, ref Attacker, SpellID, (int)damageInfo.DamageType, damageInfo.Damage, 0, damageInfo.Absorbed, IsCrit);
                 Victim2 = Attacker;
-                Character = (WS_PlayerData.CharacterObject)baseUnit;
+                Character = (CharacterObject)baseUnit;
                 if (Victim2 is WS_Creatures.CreatureObject obj)
                 {
                     var getDamage = damageInfo.GetDamage;
                     Attacker = Character;
                     obj.DealDamage(getDamage, Attacker);
-                    Character = (WS_PlayerData.CharacterObject)Attacker;
+                    Character = (CharacterObject)Attacker;
                     if (Victim2 == Victim && ((WS_Creatures.CreatureObject)Victim).IsDead)
                     {
                         AttackStop();
                     }
                 }
-                else if (Victim2 is WS_PlayerData.CharacterObject obj2)
+                else if (Victim2 is CharacterObject obj2)
                 {
                     var getDamage2 = damageInfo.GetDamage;
                     Attacker = Character;
                     obj2.DealDamage(getDamage2, Attacker);
-                    Character = (WS_PlayerData.CharacterObject)Attacker;
-                    if (((WS_PlayerData.CharacterObject)Victim2).Classe == Classes.CLASS_WARRIOR)
+                    Character = (CharacterObject)Attacker;
+                    if (((CharacterObject)Victim2).Classe == Classes.CLASS_WARRIOR)
                     {
-                        ((WS_PlayerData.CharacterObject)Victim2).Rage.Increment((int)((damageInfo.Damage / (double)(((WS_PlayerData.CharacterObject)Victim2).Level * 4) * 25.0) + 10.0));
-                        ((WS_PlayerData.CharacterObject)Victim2).SetUpdateFlag(24, ((WS_PlayerData.CharacterObject)Victim2).Rage.Current);
+                        ((CharacterObject)Victim2).Rage.Increment((int)((damageInfo.Damage / (double)(((CharacterObject)Victim2).Level * 4) * 25.0) + 10.0));
+                        ((CharacterObject)Victim2).SetUpdateFlag(24, ((CharacterObject)Victim2).Rage.Current);
                         Character.SendCharacterUpdate();
                     }
                 }
@@ -620,7 +652,7 @@ public class WS_Combat
         packet.Dispose();
     }
 
-    public float GetWeaponDmg(ref WS_PlayerData.CharacterObject objCharacter, WeaponAttackType AttackType, bool MaxDmg)
+    public float GetWeaponDmg(ref CharacterObject objCharacter, WeaponAttackType AttackType, bool MaxDmg)
     {
         byte WepSlot;
         switch (AttackType)
@@ -660,7 +692,7 @@ public class WS_Combat
 
     public float GetAPMultiplier(ref WS_Base.BaseUnit objCharacter, WeaponAttackType AttackType, bool Normalized)
     {
-        if (!Normalized || objCharacter is not WS_PlayerData.CharacterObject)
+        if (!Normalized || objCharacter is not CharacterObject)
         {
             return AttackType switch
             {
@@ -673,27 +705,27 @@ public class WS_Combat
         switch (AttackType)
         {
             case WeaponAttackType.BASE_ATTACK:
-                if (!((WS_PlayerData.CharacterObject)objCharacter).Items.ContainsKey(15))
+                if (!((CharacterObject)objCharacter).Items.ContainsKey(15))
                 {
                     return 2.4f;
                 }
-                Weapon = ((WS_PlayerData.CharacterObject)objCharacter).Items[15];
+                Weapon = ((CharacterObject)objCharacter).Items[15];
                 break;
 
             case WeaponAttackType.OFF_ATTACK:
-                if (!((WS_PlayerData.CharacterObject)objCharacter).Items.ContainsKey(16))
+                if (!((CharacterObject)objCharacter).Items.ContainsKey(16))
                 {
                     return 2.4f;
                 }
-                Weapon = ((WS_PlayerData.CharacterObject)objCharacter).Items[16];
+                Weapon = ((CharacterObject)objCharacter).Items[16];
                 break;
 
             case WeaponAttackType.RANGED_ATTACK:
-                if (!((WS_PlayerData.CharacterObject)objCharacter).Items.ContainsKey(17))
+                if (!((CharacterObject)objCharacter).Items.ContainsKey(17))
                 {
                     return 0f;
                 }
-                Weapon = ((WS_PlayerData.CharacterObject)objCharacter).Items[17];
+                Weapon = ((CharacterObject)objCharacter).Items[17];
                 break;
 
             default:
@@ -722,11 +754,11 @@ public class WS_Combat
         }
     }
 
-    public void CalculateMinMaxDamage(ref WS_PlayerData.CharacterObject objCharacter, WeaponAttackType AttackType)
+    public void CalculateMinMaxDamage(ref CharacterObject objCharacter, WeaponAttackType AttackType)
     {
         WS_Base.BaseUnit objCharacter2 = objCharacter;
         var aPMultiplier = GetAPMultiplier(ref objCharacter2, AttackType, Normalized: true);
-        objCharacter = (WS_PlayerData.CharacterObject)objCharacter2;
+        objCharacter = (CharacterObject)objCharacter2;
         var AttSpeed = aPMultiplier;
         var BasePercent = 1f;
         float BaseValue;
@@ -809,7 +841,7 @@ public class WS_Combat
         {
             result.DamageType = (DamageTypes)checked((byte)Ability.School);
         }
-        else if (Attacker is WS_PlayerData.CharacterObject characterObject)
+        else if (Attacker is CharacterObject characterObject)
         {
             if (Ranged)
             {
@@ -843,7 +875,7 @@ public class WS_Combat
         checked
         {
             skillDiference -= GetSkillDefence(ref Victim);
-            if (Victim is WS_PlayerData.CharacterObject object1)
+            if (Victim is CharacterObject object1)
             {
                 object1.UpdateSkill(95);
             }
@@ -853,12 +885,12 @@ public class WS_Combat
             var chanceToParry = GetBasePercentParry(ref Victim, skillDiference);
             var chanceToDodge = GetBasePercentDodge(ref Victim, skillDiference);
             short chanceToGlancingBlow = 0;
-            if (Attacker is WS_PlayerData.CharacterObject && Victim is WS_Creatures.CreatureObject && Attacker.Level > Victim.Level + 2 && skillDiference <= -15)
+            if (Attacker is CharacterObject && Victim is WS_Creatures.CreatureObject && Attacker.Level > Victim.Level + 2 && skillDiference <= -15)
             {
                 chanceToGlancingBlow = (short)((Victim.Level - Attacker.Level) * 10);
             }
             short chanceToCrushingBlow = 0;
-            if (Attacker is WS_Creatures.CreatureObject && Victim is WS_PlayerData.CharacterObject && Ability == null && Attacker.Level > Victim.Level + 2)
+            if (Attacker is WS_Creatures.CreatureObject && Victim is CharacterObject && Ability == null && Attacker.Level > Victim.Level + 2)
             {
                 chanceToCrushingBlow = (short)Math.Round((skillDiference * 2f) - 15f);
             }
@@ -898,7 +930,7 @@ public class WS_Combat
             {
                 chanceToCrushingBlow = 0;
             }
-            if (Victim is WS_PlayerData.CharacterObject object2 && object2.StandState != 0)
+            if (Victim is CharacterObject object2 && object2.StandState != 0)
             {
                 chanceToCrit = 100f;
                 chanceToCrushingBlow = 0;
@@ -915,7 +947,7 @@ public class WS_Combat
             var DamageReduction = Victim.GetDamageReduction(ref Attacker, result.DamageType, result.Damage);
             ref var damage = ref result.Damage;
             damage = (int)Math.Round(damage - (result.Damage * DamageReduction));
-            var roll = (float)(WorldServiceLocator.WorldServer.Rnd.Next(0, 10000) / 100.0);
+            var roll = (float)(WorldState.Rnd.Next(0, 10000) / 100.0);
             var num = roll;
             if (num < chanceToMiss)
             {
@@ -930,7 +962,7 @@ public class WS_Combat
                 DoEmote(39, ref Unit);
                 Victim = (WS_Base.BaseUnit)Unit;
                 Victim.AuraState |= 1;
-                if (Victim is WS_PlayerData.CharacterObject object3)
+                if (Victim is CharacterObject object3)
                 {
                     object3.SetUpdateFlag(125, Victim.AuraState);
                     object3.SendCharacterUpdate();
@@ -944,7 +976,7 @@ public class WS_Combat
                 DoEmote(39, ref Unit);
                 Victim = (WS_Base.BaseUnit)Unit;
                 Victim.AuraState |= 0x40;
-                if (Victim is WS_PlayerData.CharacterObject object3)
+                if (Victim is CharacterObject object3)
                 {
                     object3.SetUpdateFlag(125, Victim.AuraState);
                     object3.SendCharacterUpdate();
@@ -959,7 +991,7 @@ public class WS_Combat
             }
             else if (num < chanceToMiss + chanceToDodge + chanceToParry + chanceToGlancingBlow + chanceToBlock)
             {
-                if (Victim is WS_PlayerData.CharacterObject object3)
+                if (Victim is CharacterObject object3)
                 {
                     result.Blocked = (int)Math.Round(object3.combatBlockValue + (object3.Strength.Base / 20.0));
                     if (object3.combatBlockValue != 0)
@@ -1023,7 +1055,7 @@ public class WS_Combat
 
     public float GetBasePercentDodge(ref WS_Base.BaseUnit objCharacter, int skillDiference)
     {
-        if (objCharacter is WS_PlayerData.CharacterObject @object)
+        if (objCharacter is CharacterObject @object)
         {
             if (((uint)objCharacter.cUnitFlags & 0x40000u) != 0)
             {
@@ -1051,7 +1083,7 @@ public class WS_Combat
     {
         return objCharacter switch
         {
-            WS_PlayerData.CharacterObject _ when ((WS_PlayerData.CharacterObject)objCharacter).combatParry > 0 => ((WS_PlayerData.CharacterObject)objCharacter).combatParry - (skillDiference * 0.04f),
+            CharacterObject _ when ((CharacterObject)objCharacter).combatParry > 0 => ((CharacterObject)objCharacter).combatParry - (skillDiference * 0.04f),
             _ => 0f
         };
     }
@@ -1060,14 +1092,14 @@ public class WS_Combat
     {
         return objCharacter switch
         {
-            WS_PlayerData.CharacterObject _ when ((WS_PlayerData.CharacterObject)objCharacter).combatBlock > 0 => ((WS_PlayerData.CharacterObject)objCharacter).combatBlock - (skillDiference * 0.04f),
+            CharacterObject _ when ((CharacterObject)objCharacter).combatBlock > 0 => ((CharacterObject)objCharacter).combatBlock - (skillDiference * 0.04f),
             _ => 0f
         };
     }
 
     public float GetBasePercentMiss(ref WS_Base.BaseUnit objCharacter, int skillDiference)
     {
-        if (objCharacter is WS_PlayerData.CharacterObject characterObject)
+        if (objCharacter is CharacterObject characterObject)
         {
             if (characterObject.attackSheathState == SHEATHE_SLOT.SHEATHE_WEAPON)
             {
@@ -1085,48 +1117,48 @@ public class WS_Combat
     {
         switch (objCharacter)
         {
-            case WS_PlayerData.CharacterObject _:
+            case CharacterObject _:
                 {
                     var baseCrit = 0f;
-                    switch (((WS_PlayerData.CharacterObject)objCharacter).Classe)
+                    switch (((CharacterObject)objCharacter).Classe)
                     {
                         case Classes.CLASS_ROGUE:
-                            baseCrit = (float)(0.0 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 29.0));
+                            baseCrit = (float)(0.0 + (((CharacterObject)objCharacter).Agility.Base / 29.0));
                             break;
 
                         case Classes.CLASS_DRUID:
-                            baseCrit = (float)(0.92000001668930054 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 20.0));
+                            baseCrit = (float)(0.92000001668930054 + (((CharacterObject)objCharacter).Agility.Base / 20.0));
                             break;
 
                         case Classes.CLASS_HUNTER:
-                            baseCrit = (float)(0.0 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 33.0));
+                            baseCrit = (float)(0.0 + (((CharacterObject)objCharacter).Agility.Base / 33.0));
                             break;
 
                         case Classes.CLASS_MAGE:
-                            baseCrit = (float)(3.2000000476837158 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 19.44));
+                            baseCrit = (float)(3.2000000476837158 + (((CharacterObject)objCharacter).Agility.Base / 19.44));
                             break;
 
                         case Classes.CLASS_PALADIN:
-                            baseCrit = (float)(0.699999988079071 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 19.77));
+                            baseCrit = (float)(0.699999988079071 + (((CharacterObject)objCharacter).Agility.Base / 19.77));
                             break;
 
                         case Classes.CLASS_PRIEST:
-                            baseCrit = (float)(3.0 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 20.0));
+                            baseCrit = (float)(3.0 + (((CharacterObject)objCharacter).Agility.Base / 20.0));
                             break;
 
                         case Classes.CLASS_SHAMAN:
-                            baseCrit = (float)(1.7000000476837158 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 19.7));
+                            baseCrit = (float)(1.7000000476837158 + (((CharacterObject)objCharacter).Agility.Base / 19.7));
                             break;
 
                         case Classes.CLASS_WARLOCK:
-                            baseCrit = (float)(2.0 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 20.0));
+                            baseCrit = (float)(2.0 + (((CharacterObject)objCharacter).Agility.Base / 20.0));
                             break;
 
                         case Classes.CLASS_WARRIOR:
-                            baseCrit = (float)(0.0 + (((WS_PlayerData.CharacterObject)objCharacter).Agility.Base / 20.0));
+                            baseCrit = (float)(0.0 + (((CharacterObject)objCharacter).Agility.Base / 20.0));
                             break;
                     }
-                    return baseCrit + ((WS_PlayerData.CharacterObject)objCharacter).combatCrit + (skillDiference * 0.2f);
+                    return baseCrit + ((CharacterObject)objCharacter).combatCrit + (skillDiference * 0.2f);
                 }
 
             default:
@@ -1134,22 +1166,22 @@ public class WS_Combat
         }
     }
 
-    public float GetDistance(WS_Base.BaseObject Object1, WS_Base.BaseObject Object2)
+    public static float GetDistance(WS_Base.BaseObject Object1, WS_Base.BaseObject Object2)
     {
         return GetDistance(Object1.positionX, Object2.positionX, Object1.positionY, Object2.positionY, Object1.positionZ, Object2.positionZ);
     }
 
-    public float GetDistance(WS_Base.BaseObject Object1, float x2, float y2, float z2)
+    public static float GetDistance(WS_Base.BaseObject Object1, float x2, float y2, float z2)
     {
         return GetDistance(Object1.positionX, x2, Object1.positionY, y2, Object1.positionZ, z2);
     }
 
-    public float GetDistance(float x1, float x2, float y1, float y2, float z1, float z2)
+    public static float GetDistance(float x1, float x2, float y1, float y2, float z1, float z2)
     {
         return (float)Math.Sqrt(((x1 - x2) * (x1 - x2)) + ((y1 - y2) * (y1 - y2)) + ((z1 - z2) * (z1 - z2)));
     }
 
-    public float GetDistance(float x1, float x2, float y1, float y2)
+    public static float GetDistance(float x1, float x2, float y1, float y2)
     {
         return (float)Math.Sqrt(((x1 - x2) * (x1 - x2)) + ((y1 - y2) * (y1 - y2)));
     }
@@ -1198,7 +1230,7 @@ public class WS_Combat
     {
         checked
         {
-            if (objCharacter is WS_PlayerData.CharacterObject characterObject)
+            if (objCharacter is CharacterObject characterObject)
             {
                 int tmpSkill = default;
                 switch (characterObject.attackSheathState)
@@ -1210,18 +1242,18 @@ public class WS_Combat
                     case SHEATHE_SLOT.SHEATHE_WEAPON:
                         if (DualWield && characterObject.Items.ContainsKey(16))
                         {
-                            tmpSkill = WorldServiceLocator.WorldServer.ITEMDatabase[characterObject.Items[16].ItemEntry].GetReqSkill;
+                            tmpSkill = worldState.ItemDatabase[characterObject.Items[16].ItemEntry].GetReqSkill;
                         }
                         else if (characterObject.Items.ContainsKey(15))
                         {
-                            tmpSkill = WorldServiceLocator.WorldServer.ITEMDatabase[characterObject.Items[15].ItemEntry].GetReqSkill;
+                            tmpSkill = worldState.ItemDatabase[characterObject.Items[15].ItemEntry].GetReqSkill;
                         }
                         break;
 
                     case SHEATHE_SLOT.SHEATHE_RANGED:
                         if (characterObject.Items.ContainsKey(17))
                         {
-                            tmpSkill = WorldServiceLocator.WorldServer.ITEMDatabase[characterObject.Items[17].ItemEntry].GetReqSkill;
+                            tmpSkill = worldState.ItemDatabase[characterObject.Items[17].ItemEntry].GetReqSkill;
                         }
                         break;
                 }
@@ -1238,7 +1270,7 @@ public class WS_Combat
 
     public int GetSkillDefence(ref WS_Base.BaseUnit objCharacter)
     {
-        if (objCharacter is WS_PlayerData.CharacterObject @object)
+        if (objCharacter is CharacterObject @object)
         {
             @object.UpdateSkill(95, 0.01f);
             return @object.Skills[95].CurrentWithBonus;
@@ -1249,7 +1281,7 @@ public class WS_Combat
         }
     }
 
-    public int GetAttackTime(ref WS_PlayerData.CharacterObject objCharacter, ref bool combatDualWield)
+    public int GetAttackTime(ref CharacterObject objCharacter, ref bool combatDualWield)
     {
         switch (objCharacter.attackSheathState)
         {
@@ -1284,14 +1316,14 @@ public class WS_Combat
     {
         checked
         {
-            if (objCharacter is WS_PlayerData.CharacterObject characterObject)
+            if (objCharacter is CharacterObject characterObject)
             {
                 switch (characterObject.attackSheathState)
                 {
                     case SHEATHE_SLOT.SHEATHE_NONE:
                         result.HitInfo = 0;
                         result.DamageType = DamageTypes.DMG_PHYSICAL;
-                        result.Damage = WorldServiceLocator.WorldServer.Rnd.Next(characterObject.BaseUnarmedDamage, characterObject.BaseUnarmedDamage + 1);
+                        result.Damage = WorldState.Rnd.Next(characterObject.BaseUnarmedDamage, characterObject.BaseUnarmedDamage + 1);
                         break;
 
                     case SHEATHE_SLOT.SHEATHE_WEAPON:
@@ -1299,20 +1331,20 @@ public class WS_Combat
                         {
                             result.HitInfo = 6;
                             result.DamageType = DamageTypes.DMG_PHYSICAL;
-                            result.Damage = WorldServiceLocator.WorldServer.Rnd.Next((int)Math.Round(characterObject.OffHandDamage.Minimum / 2f), (int)Math.Round((characterObject.OffHandDamage.Maximum / 2f) + 1f)) + characterObject.BaseUnarmedDamage;
+                            result.Damage = WorldState.Rnd.Next((int)Math.Round(characterObject.OffHandDamage.Minimum / 2f), (int)Math.Round((characterObject.OffHandDamage.Maximum / 2f) + 1f)) + characterObject.BaseUnarmedDamage;
                         }
                         else
                         {
                             result.HitInfo = 2;
                             result.DamageType = DamageTypes.DMG_PHYSICAL;
-                            result.Damage = WorldServiceLocator.WorldServer.Rnd.Next((int)Math.Round(characterObject.Damage.Minimum), (int)Math.Round(characterObject.Damage.Maximum + 1f)) + characterObject.BaseUnarmedDamage;
+                            result.Damage = WorldState.Rnd.Next((int)Math.Round(characterObject.Damage.Minimum), (int)Math.Round(characterObject.Damage.Maximum + 1f)) + characterObject.BaseUnarmedDamage;
                         }
                         break;
 
                     case SHEATHE_SLOT.SHEATHE_RANGED:
                         result.HitInfo = 10;
                         result.DamageType = DamageTypes.DMG_PHYSICAL;
-                        result.Damage = WorldServiceLocator.WorldServer.Rnd.Next((int)Math.Round(characterObject.RangedDamage.Minimum), (int)Math.Round(characterObject.RangedDamage.Maximum + 1f)) + characterObject.BaseRangedDamage;
+                        result.Damage = WorldState.Rnd.Next((int)Math.Round(characterObject.RangedDamage.Minimum), (int)Math.Round(characterObject.RangedDamage.Maximum + 1f)) + characterObject.BaseRangedDamage;
                         break;
                 }
             }
@@ -1320,12 +1352,12 @@ public class WS_Combat
             {
                 WS_Creatures.CreatureObject creatureObject = (WS_Creatures.CreatureObject)objCharacter;
                 result.DamageType = DamageTypes.DMG_PHYSICAL;
-                result.Damage = WorldServiceLocator.WorldServer.Rnd.Next((int)Math.Round(WorldServiceLocator.WorldServer.CREATURESDatabase[creatureObject.ID].Damage.Minimum), (int)Math.Round(WorldServiceLocator.WorldServer.CREATURESDatabase[creatureObject.ID].Damage.Maximum + 1f));
+                result.Damage = WorldState.Rnd.Next((int)Math.Round(worldState.CreaturesDatabase[creatureObject.ID].Damage.Minimum), (int)Math.Round(worldState.CreaturesDatabase[creatureObject.ID].Damage.Maximum + 1f));
             }
         }
     }
 
-    public void SetPlayerInCombat(ref WS_PlayerData.CharacterObject objCharacter)
+    public void SetPlayerInCombat(ref CharacterObject objCharacter)
     {
         objCharacter.cUnitFlags |= 0x80000;
         objCharacter.SetUpdateFlag(46, objCharacter.cUnitFlags);
@@ -1333,7 +1365,7 @@ public class WS_Combat
         objCharacter.RemoveAurasByInterruptFlag(32);
     }
 
-    public void SetPlayerOutOfCombat(ref WS_PlayerData.CharacterObject objCharacter)
+    public void SetPlayerOutOfCombat(ref CharacterObject objCharacter)
     {
         objCharacter.cUnitFlags &= -524289;
         objCharacter.SetUpdateFlag(46, objCharacter.cUnitFlags);
@@ -1360,7 +1392,7 @@ public class WS_Combat
         {
             packet.GetInt16();
             var GUID = packet.GetUInt64();
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_ATTACKSWING [GUID={2:X}]", client.IP, client.Port, GUID);
+            logger.LogDebug("[{0}:{1}] CMSG_ATTACKSWING [GUID={2:X}]", client.IP, client.Port, GUID);
             if (client.Character.Spell_Pacifyed)
             {
                 Packets.PacketClass SMSG_ATTACKSWING_CANT_ATTACK2 = new(Opcodes.SMSG_ATTACKSWING_CANT_ATTACK);
@@ -1368,13 +1400,13 @@ public class WS_Combat
                 SMSG_ATTACKSWING_CANT_ATTACK2.Dispose();
                 SendAttackStop(client.Character.GUID, GUID, ref client);
             }
-            else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsCreature(GUID))
+            else if (LegacyGlobalFunctions.GuidIsCreature(GUID))
             {
-                client.Character.attackState.AttackStart(WorldServiceLocator.WorldServer.WORLD_CREATUREs[GUID]);
+                client.Character.attackState.AttackStart(worldState.WorldCreatures[GUID]);
             }
-            else if (WorldServiceLocator.CommonGlobalFunctions.GuidIsPlayer(GUID))
+            else if (LegacyGlobalFunctions.GuidIsPlayer(GUID))
             {
-                client.Character.attackState.AttackStart(WorldServiceLocator.WorldServer.CHARACTERs[GUID]);
+                client.Character.attackState.AttackStart(worldState.Characters[GUID]);
             }
             else
             {
@@ -1391,7 +1423,7 @@ public class WS_Combat
         try
         {
             packet.GetInt16();
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_ATTACKSTOP", client.IP, client.Port);
+            logger.LogDebug("[{0}:{1}] CMSG_ATTACKSTOP", client.IP, client.Port);
             SendAttackStop(client.Character.GUID, client.Character.TargetGUID, ref client);
             client.Character.attackState.AttackStop();
         }
@@ -1399,7 +1431,7 @@ public class WS_Combat
         {
             ProjectData.SetProjectError(ex);
             var e = ex;
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Error stopping attack: {0}", e.ToString());
+            logger.LogError("Error stopping attack: {0}", e.ToString());
             ProjectData.ClearProjectError();
         }
     }
@@ -1412,7 +1444,7 @@ public class WS_Combat
         }
         packet.GetInt16();
         var AmmoID = packet.GetInt32();
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_SET_AMMO [{2}]", client.IP, client.Port, AmmoID);
+        logger.LogDebug("[{0}:{1}] CMSG_SET_AMMO [{2}]", client.IP, client.Port, AmmoID);
         if (client.Character.IsDead)
         {
             WorldServiceLocator.WSItems.SendInventoryChangeFailure(ref client.Character, InventoryChangeFailure.EQUIP_ERR_YOU_ARE_DEAD, 0uL, 0uL);
@@ -1420,20 +1452,21 @@ public class WS_Combat
         else if (AmmoID != 0)
         {
             client.Character.AmmoID = AmmoID;
-            if (!WorldServiceLocator.WorldServer.ITEMDatabase.ContainsKey(AmmoID))
+            if (!worldState.ItemDatabase.ContainsKey(AmmoID))
             {
-                WS_Items.ItemInfo tmpItem = new(AmmoID);
+                var tmpItem = itemInfoFactory.Create(AmmoID);
             }
-            var CanUse = WorldServiceLocator.CharManagementHandler.CanUseAmmo(ref client.Character, AmmoID);
+            var CanUse = charManagementHandler.CanUseAmmo(ref client.Character, AmmoID);
             if (CanUse != 0)
             {
                 WorldServiceLocator.WSItems.SendInventoryChangeFailure(ref client.Character, CanUse, 0uL, 0uL);
                 return;
             }
             var currentDPS = 0f;
-            if ((WorldServiceLocator.WorldServer.ITEMDatabase.ContainsKey(AmmoID) && WorldServiceLocator.WorldServer.ITEMDatabase[AmmoID].ObjectClass == ITEM_CLASS.ITEM_CLASS_PROJECTILE) || WorldServiceLocator.CharManagementHandler.CheckAmmoCompatibility(ref client.Character, AmmoID))
+            if ((worldState.ItemDatabase.ContainsKey(AmmoID) && worldState.ItemDatabase[AmmoID].ObjectClass == ITEM_CLASS.ITEM_CLASS_PROJECTILE)
+                || charManagementHandler.CheckAmmoCompatibility(ref client.Character, AmmoID))
             {
-                currentDPS = WorldServiceLocator.WorldServer.ITEMDatabase[AmmoID].Damage[0].Minimum;
+                currentDPS = worldState.ItemDatabase[AmmoID].Damage[0].Minimum;
             }
             if (client.Character.AmmoDPS != currentDPS)
             {
@@ -1460,12 +1493,12 @@ public class WS_Combat
         {
             packet.GetInt16();
             SHEATHE_SLOT sheathed = (SHEATHE_SLOT)checked((byte)packet.GetInt32());
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[{0}:{1}] CMSG_SETSHEATHED [{2}]", client.IP, client.Port, sheathed);
+            logger.LogDebug("[{0}:{1}] CMSG_SETSHEATHED [{2}]", client.IP, client.Port, sheathed);
             SetSheath(ref client.Character, sheathed);
         }
     }
 
-    public void SetSheath(ref WS_PlayerData.CharacterObject objCharacter, SHEATHE_SLOT State)
+    public void SetSheath(ref CharacterObject objCharacter, SHEATHE_SLOT State)
     {
         objCharacter.attackSheathState = State;
         objCharacter.combatCanDualWield = false;
@@ -1473,7 +1506,7 @@ public class WS_Combat
         objCharacter.SetUpdateFlag(164, objCharacter.cBytes2);
         if (objCharacter is null)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "[{0}:{1} Account:{2} CharName:{3} CharGUID:{4}] Client is Null!", objCharacter.client.IP, objCharacter.client.Port, objCharacter.client.Account, objCharacter.client.Character.UnitName, objCharacter.client.Character.GUID);
+            logger.LogWarning("[{0}:{1} Account:{2} CharName:{3} CharGUID:{4}] Client is Null!", objCharacter.client.IP, objCharacter.client.Port, objCharacter.client.Account, objCharacter.client.Character.UnitName, objCharacter.client.Character.GUID);
             return;
         }
         switch (State)
@@ -1516,8 +1549,8 @@ public class WS_Combat
                         Item = (items = objCharacter.Items)[16];
                         SetVirtualItemInfo(objChar10, 1, ref Item);
                         items[16] = Item;
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "spellCanDualWeild = {0}", objCharacter.spellCanDualWeild);
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "objectClass = {0}", objCharacter.Items[16].ItemInfo.ObjectClass);
+                        logger.LogDebug("spellCanDualWeild = {0}", objCharacter.spellCanDualWeild);
+                        logger.LogDebug("objectClass = {0}", objCharacter.Items[16].ItemInfo.ObjectClass);
                         if (objCharacter.spellCanDualWeild && objCharacter.Items[16].ItemInfo.ObjectClass == ITEM_CLASS.ITEM_CLASS_WEAPON)
                         {
                             objCharacter.combatCanDualWield = true;
@@ -1561,7 +1594,7 @@ public class WS_Combat
                 }
             default:
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Unhandled sheathe state [{0}]", State);
+                    logger.LogWarning("Unhandled sheathe state [{0}]", State);
                     var objChar = objCharacter;
                     ItemObject Item = null;
                     SetVirtualItemInfo(objChar, 0, ref Item);
@@ -1577,7 +1610,7 @@ public class WS_Combat
         objCharacter.SendCharacterUpdate();
     }
 
-    public void SetVirtualItemInfo(WS_PlayerData.CharacterObject objChar, byte Slot, ref ItemObject Item)
+    public void SetVirtualItemInfo(CharacterObject objChar, byte Slot, ref ItemObject Item)
     {
         if (Slot <= 2 && Item != null)
         {

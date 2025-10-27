@@ -19,6 +19,8 @@
 using Mangos.Common.Enums.Chat;
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Misc;
+using Mangos.Common.Legacy;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
 using System;
 
@@ -29,7 +31,7 @@ public partial class WS_Creatures_AI
     public class CritterAI : TBaseAI
     {
         protected WS_Creatures.CreatureObject aiCreature;
-
+        private readonly WS_Maps maps;
         protected int aiTimer;
 
         protected int CombatTimer;
@@ -40,7 +42,7 @@ public partial class WS_Creatures_AI
 
         protected const float PIx2 = (float)Math.PI * 2f;
 
-        public CritterAI(ref WS_Creatures.CreatureObject Creature)
+        public CritterAI(ref WS_Creatures.CreatureObject Creature, WS_Maps maps)
         {
             aiCreature = null;
             aiTimer = 0;
@@ -48,10 +50,11 @@ public partial class WS_Creatures_AI
             WasAlive = true;
             State = AIState.AI_WANDERING;
             aiCreature = Creature ?? throw new ArgumentNullException(nameof(Creature));
+            this.maps = maps;
             aiTarget = null;
         }
 
-        public override bool IsMoving => checked(WorldServiceLocator.NativeMethods.timeGetTime("") - aiCreature.LastMove) < aiTimer
+        public override bool IsMoving => checked(LegacyNativeMethods.TimeGetTime("") - aiCreature.LastMove) < aiTimer
             && (State switch
             {
                 AIState.AI_MOVE_FOR_ATTACK => true,
@@ -153,7 +156,7 @@ public partial class WS_Creatures_AI
                         break;
 
                     case AIState.AI_WANDERING:
-                        if (WorldServiceLocator.WorldServer.Rnd.NextDouble() > 0.20000000298023224)
+                        if (WorldState.Rnd.NextDouble() > 0.20000000298023224)
                         {
                             DoMove();
                         }
@@ -221,19 +224,19 @@ public partial class WS_Creatures_AI
                         }
                     }
                     var distance = (!DoRun) ? ((float)(3.0 * aiCreature?.CreatureInfo?.WalkSpeed)) : ((float)(3.0 * aiCreature?.CreatureInfo?.RunSpeed * aiCreature?.SpeedMod));
-                    var angle = (float)(WorldServiceLocator.WorldServer.Rnd.NextDouble() * 6.2831854820251465);
+                    var angle = (float)(WorldState.Rnd.NextDouble() * 6.2831854820251465);
                     aiCreature?.SetToRealPosition();
                     aiCreature.orientation = angle;
                     selectedX = (float)(aiCreature?.positionX + (Math.Cos(angle) * distance));
                     selectedY = (float)(aiCreature?.positionY + (Math.Sin(angle) * distance));
-                    selectedZ = WorldServiceLocator.WSMaps.GetZCoord(selectedX, selectedY, aiCreature.positionZ, aiCreature.MapID);
+                    selectedZ = maps.GetZCoord(selectedX, selectedY, aiCreature.positionZ, aiCreature.MapID);
                     MoveTries = (byte)(MoveTries + 1);
                     if (!(Math.Abs(aiCreature.positionZ - selectedZ) > 5f))
                     {
                         ref var reference = ref aiCreature;
                         WS_Base.BaseObject obj = reference;
                         reference = (WS_Creatures.CreatureObject)obj;
-                        var flag = WorldServiceLocator.WSMaps.IsInLineOfSight(ref obj, selectedX, selectedY, selectedZ + 2f);
+                        var flag = maps.IsInLineOfSight(ref obj, selectedX, selectedY, selectedZ + 2f);
                         if (flag)
                         {
                             break;

@@ -16,14 +16,19 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Group;
 using Mangos.Common.Legacy;
+using Mangos.Configuration;
 using Mangos.DataStores;
 using Mangos.World.Globals;
+using Mangos.World.Handlers;
 using Mangos.World.Maps;
+using Mangos.World.Objects.Factories;
+using Mangos.World.Objects.Factories.Client;
+using Mangos.World.Objects.Factories.Groups;
+using Mangos.World.Objects.Factories.Maps;
 using Mangos.World.Player;
-using Mangos.World.Social;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections.Generic;
@@ -38,43 +43,79 @@ public partial class WS_Network
 {
     public class WorldServerClass : IWorld, IDisposable
     {
-        private readonly DataStoreProvider dataStoreProvider;
-        private readonly ICluster cluster;
-        public bool _flagStopListen;
-
-        public string LocalURI;
-
         private readonly string m_RemoteURI;
-
         private readonly Timer m_Connection;
-
         private readonly Timer m_TimerCPU;
+        private DateTime _lastInfo;
+        private double _lastCPUTime;
+        private float _usageCPU;
+        private bool _disposedValue;
+        private readonly ILogger<WorldServerClass> logger;
 
-        private DateTime LastInfo;
-
-        private double LastCPUTime;
-
-        private float UsageCPU;
+        // DI
+        private readonly ICluster _cluster;
+        private readonly WorldState worldState;
+        private readonly WS_Player_Creation _playerCreation;
+        private readonly WS_Handlers_Instance _instance;
+        private readonly WS_PlayerHelper _playerHelper;
+        private readonly WS_Maps maps;
+        private readonly WS_Network network;
+        private readonly MapFactory mapFactory;
+        private readonly GroupFactory groupFactory;
+        private readonly ClientClassFactory clientClassFactory;
+        private readonly CharacterObjectFactory characterObjectFactory;
+        private readonly MangosConfiguration _configuration;
+        private readonly DataStoreProvider _dataStoreProvider;
 
         public ICluster Cluster;
+        public bool FlagStopListen;
+        public string LocalURI;
 
-        private bool _disposedValue;
-
-        public WorldServerClass(DataStoreProvider dataStoreProvider, ICluster cluster)
+        public WorldServerClass(
+            ILogger<WorldServerClass> logger,
+            ICluster cluster,
+            MangosConfiguration configuration,
+            WorldState worldState,
+            DataStoreProvider dataStoreProvider,
+            WS_Player_Creation playerCreation,
+            WS_Handlers_Instance instance,
+            WS_PlayerHelper playerHelper,
+            WS_Maps maps,
+            WS_Network network,
+            MapFactory mapFactory,
+            GroupFactory groupFactory,
+            ClientClassFactory clientClassFactory,
+            CharacterObjectFactory characterObjectFactory)
         {
-            _flagStopListen = false;
-            LastCPUTime = 0.0;
-            UsageCPU = 0f;
+            FlagStopListen = false;
+            _lastCPUTime = 0.0;
+            _usageCPU = 0f;
             Cluster = null;
-            var configuration = WorldServiceLocator.MangosConfiguration.World;
-            m_RemoteURI = $"http://{configuration.ClusterConnectHost}:{configuration.ClusterConnectPort}";
-            LocalURI = $"http://{configuration.LocalConnectHost}:{configuration.LocalConnectPort}";
+
+            var worldConfiguration = configuration.World;
+
+            m_RemoteURI = $"http://{worldConfiguration.ClusterConnectHost}:{worldConfiguration.ClusterConnectPort}";
+            LocalURI = $"http://{worldConfiguration.LocalConnectHost}:{worldConfiguration.LocalConnectPort}";
             Cluster = null;
-            WorldServiceLocator.WSNetwork.LastPing = WorldServiceLocator.NativeMethods.timeGetTime("");
+
+            network.LastPing = LegacyNativeMethods.TimeGetTime("");
             m_Connection = new Timer(CheckConnection, null, 10000, 10000);
             m_TimerCPU = new Timer(CheckCPU, null, 1000, 1000);
-            this.dataStoreProvider = dataStoreProvider;
-            this.cluster = cluster;
+
+            _dataStoreProvider = dataStoreProvider;
+            this.logger = logger;
+            _cluster = cluster;
+            this.worldState = worldState;
+            _playerCreation = playerCreation;
+            _instance = instance;
+            _playerHelper = playerHelper;
+            this.maps = maps;
+            this.network = network;
+            this.mapFactory = mapFactory;
+            this.groupFactory = groupFactory;
+            this.clientClassFactory = clientClassFactory;
+            this.characterObjectFactory = characterObjectFactory;
+            _configuration = configuration;
         }
 
         protected virtual void Dispose(bool disposing)
@@ -82,10 +123,11 @@ public partial class WS_Network
             if (!_disposedValue)
             {
                 ClusterDisconnect();
-                _flagStopListen = true;
+                FlagStopListen = true;
                 m_TimerCPU.Dispose();
                 m_Connection.Dispose();
             }
+
             _disposedValue = true;
         }
 
@@ -107,37 +149,40 @@ public partial class WS_Network
             {
                 try
                 {
-                    Cluster = cluster;
+                    Cluster = _cluster;
                     if (Cluster != null)
                     {
-                        var configuration = WorldServiceLocator.MangosConfiguration.World;
-                        if (Cluster.Connect(LocalURI, configuration.Maps.Select(x => Conversions.ToUInteger(x)).ToList(), this))
+                        var worldConfiguration = _configuration.World;
+                        if (Cluster.Connect(LocalURI, worldConfiguration.Maps.Select(x => Conversions.ToUInteger(x)).ToList(), this))
                         {
                             break;
                         }
-                        Cluster.Disconnect(LocalURI, configuration.Maps.Select(x => Conversions.ToUInteger(x)).ToList());
+
+                        Cluster.Disconnect(LocalURI, worldConfiguration.Maps.Select(x => Conversions.ToUInteger(x)).ToList());
                     }
                 }
                 catch (Exception ex)
                 {
                     var e = ex;
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Unable to connect to cluster. [{0}]", e.Message);
+                    logger.LogError("Unable to connect to cluster. [{0}]", e.Message);
                 }
+
                 Cluster = null;
                 Thread.Sleep(3000);
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.SUCCESS, "Contacted cluster [{0}]", m_RemoteURI);
+
+            logger.LogInformation("Contacted cluster [{0}]", m_RemoteURI);
         }
 
         public void ClusterDisconnect()
         {
             try
             {
-                Cluster.Disconnect(LocalURI, WorldServiceLocator.MangosConfiguration.World.Maps.Select(x => Conversions.ToUInteger(x)).ToList());
+                Cluster.Disconnect(LocalURI, _configuration.World.Maps.Select(x => Conversions.ToUInteger(x)).ToList());
             }
             catch (Exception ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Cluster Disconnected [{0}]", ex);
+                logger.LogWarning("Cluster Disconnected [{0}]", ex);
             }
             finally
             {
@@ -149,10 +194,10 @@ public partial class WS_Network
         {
             checked
             {
-                if (!WorldServiceLocator.WSMaps.Maps.ContainsKey((uint)map))
+                if (!maps.Maps.ContainsKey((uint)map))
                 {
-                    WorldServiceLocator.WorldServer.CLIENTs[ID].Character.Dispose();
-                    WorldServiceLocator.WorldServer.CLIENTs[ID].Delete();
+                    worldState.ConnectedClients[ID].Character.Dispose();
+                    worldState.ConnectedClients[ID].Delete();
                 }
                 Cluster.ClientTransfer(ID, posX, posY, posZ, ori, (uint)map);
             }
@@ -160,17 +205,19 @@ public partial class WS_Network
 
         public void ClientConnect(uint id, ClientInfo client)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[{0:000000}] Client connected", id);
+            logger.LogInformation("[{0:000000}] Client connected", id);
             if (client == null)
             {
                 throw new ApplicationException("Client doesn't exist!");
             }
-            ClientClass objCharacter = new(client);
-            if (WorldServiceLocator.WorldServer.CLIENTs.ContainsKey(id))
+
+            var objCharacter = clientClassFactory.Create(client);
+            if (worldState.ConnectedClients.ContainsKey(id))
             {
-                WorldServiceLocator.WorldServer.CLIENTs.Remove(id);
+                worldState.ConnectedClients.Remove(id);
             }
-            WorldServiceLocator.WorldServer.CLIENTs.Add(id, objCharacter);
+
+            worldState.ConnectedClients.Add(id, objCharacter);
         }
 
         void IWorld.ClientConnect(uint id, ClientInfo client)
@@ -181,10 +228,10 @@ public partial class WS_Network
 
         public void ClientDisconnect(uint id)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[{0:000000}] Client disconnected", id);
-            WorldServiceLocator.WorldServer.CLIENTs[id].Character?.Save();
-            WorldServiceLocator.WorldServer.CLIENTs[id].Delete();
-            WorldServiceLocator.WorldServer.CLIENTs.Remove(id);
+            logger.LogInformation("[{0:000000}] Client disconnected", id);
+            worldState.ConnectedClients[id].Character?.Save();
+            worldState.ConnectedClients[id].Delete();
+            worldState.ConnectedClients.Remove(id);
         }
 
         void IWorld.ClientDisconnect(uint id)
@@ -195,23 +242,27 @@ public partial class WS_Network
 
         public void ClientLogin(uint id, ulong guid)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[{0:000000}] Client login [0x{1:X}]", id, guid);
+            logger.LogInformation("[{0:000000}] Client login [0x{1:X}]", id, guid);
             try
             {
-                var client = WorldServiceLocator.WorldServer.CLIENTs[id];
-                WS_PlayerData.CharacterObject Character = new(ref client, guid);
-                WorldServiceLocator.WorldServer.CHARACTERs_Lock.AcquireWriterLock(WorldServiceLocator.GlobalConstants.DEFAULT_LOCK_TIMEOUT);
-                WorldServiceLocator.WorldServer.CHARACTERs[guid] = Character;
-                WorldServiceLocator.WorldServer.CHARACTERs_Lock.ReleaseWriterLock();
-                WorldServiceLocator.Functions.SendCorpseReclaimDelay(ref client, ref Character);
-                WorldServiceLocator.WSPlayerHelper.InitializeTalentSpells(Character);
+                var client = worldState.ConnectedClients[id];
+
+                var Character = characterObjectFactory.Create(ref client, guid);
+                worldState.CharactersLock.EnterWriteLock();
+                worldState.Characters[guid] = Character;
+                worldState.CharactersLock.ExitWriteLock();
+                Globals.Functions.SendCorpseReclaimDelay(logger, ref client, ref Character);
+
+                _playerHelper.InitializeTalentSpells(Character);
+
                 Character.Login();
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.USER, "[{0}:{1}] Player login complete [0x{2:X}]", client.IP, client.Port, guid);
+
+                logger.LogInformation("[{0}:{1}] Player login complete [0x{2:X}]", client.IP, client.Port, guid);
             }
             catch (Exception ex)
             {
                 var e = ex;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Error on login: {0}", e.ToString());
+                logger.LogError("Error on login: {0}", e.ToString());
             }
         }
 
@@ -223,8 +274,8 @@ public partial class WS_Network
 
         public void ClientLogout(uint id)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[{0:000000}] Client logout", id);
-            WorldServiceLocator.WorldServer.CLIENTs[id].Character.Logout();
+            logger.LogInformation("[{0:000000}] Client logout", id);
+            worldState.ConnectedClients[id].Character.Logout();
         }
 
         void IWorld.ClientLogout(uint id)
@@ -242,20 +293,20 @@ public partial class WS_Network
 
             try
             {
-                if (WorldServiceLocator.WorldServer.CLIENTs.TryGetValue(id, out var _client))
+                if (worldState.ConnectedClients.TryGetValue(id, out var _client))
                 {
                     Packets.PacketClass p = new(ref data);
                     _client?.PushPacket(p);
                 }
                 else
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Client ID doesn't contain a key!: {0}", ToString());
+                    logger.LogWarning("Client ID doesn't contain a key!: {0}", ToString());
                 }
             }
             catch (Exception ex2)
             {
                 var ex = ex2;
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Error on Client OnPacket: {0}", ex.ToString());
+                logger.LogError("Error on Client OnPacket: {0}", ex.ToString());
             }
         }
 
@@ -277,8 +328,9 @@ public partial class WS_Network
                 throw new ArgumentException($"'{nameof(name)}' cannot be null or empty", nameof(name));
             }
 
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "Account {0} Created a character with Name {1}, Race {2}, Class {3}, Gender {4}, Skin {5}, Face {6}, HairStyle {7}, HairColor {8}, FacialHair {9}, outfitID {10}", account, name, race, classe, gender, skin, face, hairStyle, hairColor, facialHair, outfitId);
-            return WorldServiceLocator.WSPlayerCreation.CreateCharacter(account, name, race, classe, gender, skin, face, hairStyle, hairColor, facialHair, outfitId);
+            logger.LogInformation("Account {0} Created a character with Name {1}, Race {2}, Class {3}, Gender {4}, Skin {5}, Face {6}, HairStyle {7}, HairColor {8}, FacialHair {9}, outfitID {10}", account, name, race, classe, gender, skin, face, hairStyle, hairColor, facialHair, outfitId);
+
+            return _playerCreation.CreateCharacter(account, name, race, classe, gender, skin, face, hairStyle, hairColor, facialHair, outfitId);
         }
 
         int IWorld.ClientCreateCharacter(string account, string name, byte race, byte classe, byte gender, byte skin, byte face, byte hairStyle, byte hairColor, byte facialHair, byte outfitId)
@@ -292,6 +344,7 @@ public partial class WS_Network
             {
                 throw new ArgumentException($"'{nameof(name)}' cannot be null or empty", nameof(name));
             }
+
             //ILSpy generated this explicit interface implementation from .override directive in ClientCreateCharacter
             return ClientCreateCharacter(account, name, race, classe, gender, skin, face, hairStyle, hairColor, facialHair, outfitId);
         }
@@ -300,10 +353,10 @@ public partial class WS_Network
         {
             checked
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "Cluster ping: [{0}ms]", WorldServiceLocator.NativeMethods.timeGetTime("") - timestamp);
-                WorldServiceLocator.WSNetwork.LastPing = WorldServiceLocator.NativeMethods.timeGetTime("");
-                WorldServiceLocator.WSNetwork.WC_MsTime = timestamp + latency;
-                return WorldServiceLocator.NativeMethods.timeGetTime("");
+                logger.LogInformation("Cluster ping: [{0}ms]", LegacyNativeMethods.TimeGetTime("") - timestamp);
+                network.LastPing = LegacyNativeMethods.TimeGetTime("");
+                network.WC_MsTime = timestamp + latency;
+                return LegacyNativeMethods.TimeGetTime("");
             }
         }
 
@@ -315,33 +368,36 @@ public partial class WS_Network
 
         public void CheckConnection(object State)
         {
-            if ((WorldServiceLocator.NativeMethods.timeGetTime("") - WorldServiceLocator.WSNetwork.LastPing) > 40000)
+            if ((LegacyNativeMethods.TimeGetTime("") - network.LastPing) > 40000)
             {
                 if (Cluster != null)
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Cluster timed out. Reconnecting");
+                    logger.LogError("Cluster timed out. Reconnecting");
                     ClusterDisconnect();
                 }
+
                 ClusterConnect();
-                WorldServiceLocator.WSNetwork.LastPing = WorldServiceLocator.NativeMethods.timeGetTime("");
+                network.LastPing = LegacyNativeMethods.TimeGetTime("");
             }
         }
 
         public void CheckCPU(object State)
         {
-            var TimeSinceLastCheck = DateTime.Now.Subtract(LastInfo);
-            UsageCPU = (float)((Process.GetCurrentProcess().TotalProcessorTime.TotalMilliseconds - LastCPUTime) / TimeSinceLastCheck.TotalMilliseconds * 100.0);
-            LastInfo = DateTime.Now;
-            LastCPUTime = Process.GetCurrentProcess().TotalProcessorTime.TotalMilliseconds;
+            var TimeSinceLastCheck = DateTime.Now.Subtract(_lastInfo);
+
+            _usageCPU = (float)((Process.GetCurrentProcess().TotalProcessorTime.TotalMilliseconds - _lastCPUTime) / TimeSinceLastCheck.TotalMilliseconds * 100.0);
+            _lastInfo = DateTime.Now;
+            _lastCPUTime = Process.GetCurrentProcess().TotalProcessorTime.TotalMilliseconds;
         }
 
         public ServerInfo GetServerInfo()
         {
             ServerInfo serverInfo = new()
             {
-                CpuUsage = UsageCPU,
+                CpuUsage = _usageCPU,
                 MemoryUsage = checked((ulong)Math.Round(Process.GetCurrentProcess().WorkingSet64 / 1048576.0))
             };
+
             return serverInfo;
         }
 
@@ -351,35 +407,36 @@ public partial class WS_Network
             return GetServerInfo();
         }
 
-        public async Task InstanceCreateAsync(uint MapID)
+        public async Task InstanceCreateAsync(uint mapId)
         {
-            if (!WorldServiceLocator.WSMaps.Maps.ContainsKey(MapID))
+            if (!maps.Maps.ContainsKey(mapId))
             {
-                WS_Maps.TMap Map = new(checked((int)MapID), await dataStoreProvider.GetDataStoreAsync("Map.dbc"));
+                var map = mapFactory.Create(checked((int)mapId), await _dataStoreProvider.GetDataStoreAsync("Map.dbc"));
             }
         }
 
-        async Task IWorld.InstanceCreateAsync(uint MapID)
+        async Task IWorld.InstanceCreateAsync(uint mapId)
         {
             //ILSpy generated this explicit interface implementation from .override directive in InstanceCreate
-            await InstanceCreateAsync(MapID).ConfigureAwait(false);
+            await InstanceCreateAsync(mapId).ConfigureAwait(false);
         }
 
-        public void InstanceDestroy(uint MapID)
+        public void InstanceDestroy(uint mapId)
         {
-            WorldServiceLocator.WSMaps.Maps[MapID].Dispose();
+            maps.Maps[mapId].Dispose();
         }
 
-        void IWorld.InstanceDestroy(uint MapID)
+        void IWorld.InstanceDestroy(uint mapId)
         {
             //ILSpy generated this explicit interface implementation from .override directive in InstanceDestroy
-            InstanceDestroy(MapID);
+            InstanceDestroy(mapId);
         }
 
-        public bool InstanceCanCreate(int Type)
+        public bool InstanceCanCreate(int type)
         {
-            var configuration = WorldServiceLocator.MangosConfiguration.World;
-            return Type switch
+            var configuration = _configuration.World;
+
+            return type switch
             {
                 3 => configuration.CreateBattlegrounds,
                 1 => configuration.CreatePartyInstances,
@@ -389,33 +446,37 @@ public partial class WS_Network
             };
         }
 
-        bool IWorld.InstanceCanCreate(int Type)
+        bool IWorld.InstanceCanCreate(int type)
         {
             //ILSpy generated this explicit interface implementation from .override directive in InstanceCanCreate
-            return InstanceCanCreate(Type);
+            return InstanceCanCreate(type);
         }
 
-        public void ClientSetGroup(uint ID, long GroupID)
+        public void ClientSetGroup(uint id, long groupId)
         {
-            if (!WorldServiceLocator.WorldServer.CLIENTs.ContainsKey(ID))
+            if (!worldState.ConnectedClients.ContainsKey(id))
             {
                 return;
             }
-            if (GroupID == -1)
+
+            if (groupId == -1)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[{0:000000}] Client group set [G NULL]", ID);
-                WorldServiceLocator.WorldServer.CLIENTs[ID].Character.Group = null;
-                WorldServiceLocator.WSHandlersInstance.InstanceMapLeave(WorldServiceLocator.WorldServer.CLIENTs[ID].Character);
+                logger.LogInformation("[{0:000000}] Client group set [G NULL]", id);
+                worldState.ConnectedClients[id].Character.Group = null;
+                _instance.InstanceMapLeave(worldState.ConnectedClients[id].Character);
                 return;
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[{0:000000}] Client group set [G{1:00000}]", ID, GroupID);
-            if (!WorldServiceLocator.WSGroup.Groups.ContainsKey(GroupID))
+
+            logger.LogInformation("[{0:000000}] Client group set [G{1:00000}]", id, groupId);
+
+            if (!WorldServiceLocator.WSGroup.Groups.ContainsKey(groupId))
             {
-                WS_Group.Group Group = new(GroupID);
-                Cluster.GroupRequestUpdate(ID);
+                var Group = groupFactory.Create(groupId);
+                Cluster.GroupRequestUpdate(id);
             }
-            WorldServiceLocator.WorldServer.CLIENTs[ID].Character.Group = WorldServiceLocator.WSGroup.Groups[GroupID];
-            WorldServiceLocator.WSHandlersInstance.InstanceMapEnter(WorldServiceLocator.WorldServer.CLIENTs[ID].Character);
+
+            worldState.ConnectedClients[id].Character.Group = WorldServiceLocator.WSGroup.Groups[groupId];
+            _instance.InstanceMapEnter(worldState.ConnectedClients[id].Character, maps);
         }
 
         void IWorld.ClientSetGroup(uint ID, long GroupID)
@@ -430,20 +491,23 @@ public partial class WS_Network
             {
                 return;
             }
+
             List<ulong> list = new();
             foreach (var GUID in Members)
             {
-                if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(GUID))
+                if (worldState.Characters.ContainsKey(GUID))
                 {
                     list.Add(GUID);
                 }
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[G{0:00000}] Group update [{2}, {1} local members]", GroupID, list.Count, (GroupType)GroupType);
+
+            logger.LogInformation("[G{0:00000}] Group update [{2}, {1} local members]", GroupID, list.Count, (GroupType)GroupType);
             if (list.Count == 0)
             {
                 WorldServiceLocator.WSGroup.Groups[GroupID].Dispose();
                 return;
             }
+
             WorldServiceLocator.WSGroup.Groups[GroupID].Type = (GroupType)GroupType;
             WorldServiceLocator.WSGroup.Groups[GroupID].Leader = GroupLeader;
             WorldServiceLocator.WSGroup.Groups[GroupID].LocalMembers = list;
@@ -459,11 +523,11 @@ public partial class WS_Network
         {
             if (WorldServiceLocator.WSGroup.Groups.ContainsKey(GroupID))
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[G{0:00000}] Group update loot", GroupID);
+                logger.LogInformation("[G{0:00000}] Group update loot", GroupID);
                 WorldServiceLocator.WSGroup.Groups[GroupID].DungeonDifficulty = (GroupDungeonDifficulty)Difficulty;
                 WorldServiceLocator.WSGroup.Groups[GroupID].LootMethod = (GroupLootMethod)Method;
                 WorldServiceLocator.WSGroup.Groups[GroupID].LootThreshold = (GroupLootThreshold)Threshold;
-                WorldServiceLocator.WSGroup.Groups[GroupID].LocalLootMaster = WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(Master) ? WorldServiceLocator.WorldServer.CHARACTERs[Master] : null;
+                WorldServiceLocator.WSGroup.Groups[GroupID].LocalLootMaster = worldState.Characters.ContainsKey(Master) ? worldState.Characters[Master] : null;
             }
         }
 
@@ -480,9 +544,9 @@ public partial class WS_Network
                 Flag = 1015;
             }
             var wS_Group = WorldServiceLocator.WSGroup;
-            Dictionary<ulong, WS_PlayerData.CharacterObject> cHARACTERs;
+            Dictionary<ulong, CharacterObject> cHARACTERs;
             ulong key;
-            var objCharacter = (cHARACTERs = WorldServiceLocator.WorldServer.CHARACTERs)[key = GUID];
+            var objCharacter = (cHARACTERs = worldState.Characters)[key = GUID];
             var packetClass = wS_Group.BuildPartyMemberStats(ref objCharacter, checked((uint)Flag));
             cHARACTERs[key] = objCharacter;
             var p = packetClass;
@@ -498,11 +562,11 @@ public partial class WS_Network
 
         public void GuildUpdate(ulong GUID, uint GuildID, byte GuildRank)
         {
-            WorldServiceLocator.WorldServer.CHARACTERs[GUID].GuildID = GuildID;
-            WorldServiceLocator.WorldServer.CHARACTERs[GUID].GuildRank = GuildRank;
-            WorldServiceLocator.WorldServer.CHARACTERs[GUID].SetUpdateFlag(191, GuildID);
-            WorldServiceLocator.WorldServer.CHARACTERs[GUID].SetUpdateFlag(192, GuildRank);
-            WorldServiceLocator.WorldServer.CHARACTERs[GUID].SendCharacterUpdate();
+            worldState.Characters[GUID].GuildID = GuildID;
+            worldState.Characters[GUID].GuildRank = GuildRank;
+            worldState.Characters[GUID].SetUpdateFlag(191, GuildID);
+            worldState.Characters[GUID].SetUpdateFlag(192, GuildRank);
+            worldState.Characters[GUID].SendCharacterUpdate();
         }
 
         void IWorld.GuildUpdate(ulong GUID, uint GuildID, byte GuildRank)
@@ -513,7 +577,7 @@ public partial class WS_Network
 
         public void BattlefieldCreate(int BattlefieldID, byte BattlefieldMapType, uint Map)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[B{0:0000}] Battlefield created", BattlefieldID);
+            logger.LogInformation("[B{0:0000}] Battlefield created", BattlefieldID);
         }
 
         void IWorld.BattlefieldCreate(int BattlefieldID, byte BattlefieldMapType, uint Map)
@@ -524,7 +588,7 @@ public partial class WS_Network
 
         public void BattlefieldDelete(int BattlefieldID)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[B{0:0000}] Battlefield deleted", BattlefieldID);
+            logger.LogInformation("[B{0:0000}] Battlefield deleted", BattlefieldID);
         }
 
         void IWorld.BattlefieldDelete(int BattlefieldID)
@@ -535,7 +599,7 @@ public partial class WS_Network
 
         public void BattlefieldJoin(int BattlefieldID, ulong GUID)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[B{0:0000}] Character [0x{1:X}] joined battlefield", BattlefieldID, GUID);
+            logger.LogInformation("[B{0:0000}] Character [0x{1:X}] joined battlefield", BattlefieldID, GUID);
         }
 
         void IWorld.BattlefieldJoin(int BattlefieldID, ulong GUID)
@@ -546,7 +610,7 @@ public partial class WS_Network
 
         public void BattlefieldLeave(int BattlefieldID, ulong GUID)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.NETWORK, "[B{0:0000}] Character [0x{1:X}] left battlefield", BattlefieldID, GUID);
+            logger.LogInformation("[B{0:0000}] Character [0x{1:X}] left battlefield", BattlefieldID, GUID);
         }
 
         void IWorld.BattlefieldLeave(int BattlefieldID, ulong GUID)

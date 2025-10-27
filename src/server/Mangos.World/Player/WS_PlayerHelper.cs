@@ -19,9 +19,13 @@
 using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Spell;
 using Mangos.Common.Globals;
+using Mangos.Common.Legacy.Databases;
 using Mangos.World.Globals;
+using Mangos.World.Handlers;
+using Mangos.World.Maps;
 using Mangos.World.Network;
 using Mangos.World.Objects;
+using Mangos.World.Objects.Factories.Spells;
 using Mangos.World.Spells;
 using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.CompilerServices;
@@ -33,6 +37,15 @@ namespace Mangos.World.Player;
 
 public class WS_PlayerHelper
 {
+    private readonly WS_Network network;
+    private readonly SpellTargetsFactory spellTargetsFactory;
+
+    public WS_PlayerHelper(WS_Network network, SpellTargetsFactory spellTargetsFactory)
+    {
+        this.network = network;
+        this.spellTargetsFactory = spellTargetsFactory;
+    }
+
     public class TSkill
     {
         private short _Current;
@@ -248,8 +261,9 @@ public class WS_PlayerHelper
         public int KillsHonorableLifetime;
 
         public int KillsDisHonorableLifetime;
+        private readonly CharacterDatabase characterDatabase;
 
-        public THonor()
+        public THonor(CharacterDatabase characterDatabase)
         {
             CharGUID = 0uL;
             HonorPoints = 0;
@@ -266,6 +280,7 @@ public class WS_PlayerHelper
             KillsDisHonorableToday = 0;
             KillsHonorableLifetime = 0;
             KillsDisHonorableLifetime = 0;
+            this.characterDatabase = characterDatabase;
         }
 
         public void Save()
@@ -286,7 +301,7 @@ public class WS_PlayerHelper
             tmp = tmp + ", kills_dishonorableLifetime =" + Conversions.ToString(KillsDisHonorableLifetime);
             tmp = tmp + ", kills_honorableLifetime =" + Conversions.ToString(KillsHonorableLifetime);
             tmp += $" WHERE char_guid = \"{CharGUID}\";";
-            WorldServiceLocator.WorldServer.CharacterDatabase.Update(tmp);
+            characterDatabase.Update(tmp);
         }
 
         public void Load(ulong GUID)
@@ -341,8 +356,9 @@ public class WS_PlayerHelper
         public ulong CharacterGUID;
 
         private bool _disposedValue;
+        private readonly WorldState worldState;
 
-        public TDrowningTimer(ref WS_PlayerData.CharacterObject Character)
+        public TDrowningTimer(WorldState worldState, ref CharacterObject Character)
         {
             DrowningTimer = null;
             DrowningValue = 70000;
@@ -351,6 +367,7 @@ public class WS_PlayerHelper
             CharacterGUID = Character.GUID;
             Character.StartMirrorTimer(MirrorTimer.DROWNING, 70000);
             DrowningTimer = new Timer(Character.HandleDrowning, null, 2000, 1000);
+            this.worldState = worldState;
         }
 
         protected virtual void Dispose(bool disposing)
@@ -362,9 +379,9 @@ public class WS_PlayerHelper
                     DrowningTimer.Dispose();
                     DrowningTimer = null;
                 }
-                if (WorldServiceLocator.WorldServer.CHARACTERs.ContainsKey(CharacterGUID))
+                if (worldState.Characters.ContainsKey(CharacterGUID))
                 {
-                    WorldServiceLocator.WorldServer.CHARACTERs[CharacterGUID].StopMirrorTimer(MirrorTimer.DROWNING);
+                    worldState.Characters[CharacterGUID].StopMirrorTimer(MirrorTimer.DROWNING);
                 }
             }
             _disposedValue = true;
@@ -387,21 +404,26 @@ public class WS_PlayerHelper
     {
         private Timer RepopTimer;
 
-        public WS_PlayerData.CharacterObject Character;
-
         private bool _disposedValue;
 
-        public TRepopTimer(ref WS_PlayerData.CharacterObject Character)
+        // DI
+        public CharacterObject Character;
+        private readonly WS_Maps maps;
+        private readonly WS_Handlers_Misc misc;
+
+        public TRepopTimer(WorldState worldState, ref CharacterObject Character, WS_Maps maps, WS_Handlers_Misc misc)
         {
             RepopTimer = null;
             this.Character = null;
             this.Character = Character;
+            this.maps = maps;
+            this.misc = misc;
             RepopTimer = new Timer(Repop, null, 360000, 360000);
         }
 
         public void Repop(object Obj)
         {
-            WorldServiceLocator.WSHandlersMisc.CharacterRepop(ref Character.client);
+            misc.CharacterRepop(ref Character.client, maps);
             Character.repopTimer = null;
             Dispose();
         }
@@ -429,7 +451,7 @@ public class WS_PlayerHelper
         }
     }
 
-    public void SendBindPointUpdate(ref WS_Network.ClientClass client, ref WS_PlayerData.CharacterObject Character)
+    public void SendBindPointUpdate(ref WS_Network.ClientClass client, ref CharacterObject Character)
     {
         Packets.PacketClass SMSG_BINDPOINTUPDATE = new(Opcodes.SMSG_BINDPOINTUPDATE);
         try
@@ -447,12 +469,12 @@ public class WS_PlayerHelper
         }
     }
 
-    public void Send_SMSG_SET_REST_START(ref WS_Network.ClientClass client, ref WS_PlayerData.CharacterObject Character)
+    public void Send_SMSG_SET_REST_START(ref WS_Network.ClientClass client, ref CharacterObject Character)
     {
         Packets.PacketClass SMSG_SET_REST_START = new(Opcodes.SMSG_SET_REST_START);
         try
         {
-            SMSG_SET_REST_START.AddInt32(WorldServiceLocator.WSNetwork.MsTime());
+            SMSG_SET_REST_START.AddInt32(network.MsTime());
             client.Send(ref SMSG_SET_REST_START);
         }
         finally
@@ -461,7 +483,7 @@ public class WS_PlayerHelper
         }
     }
 
-    public void SendTutorialFlags(ref WS_Network.ClientClass client, ref WS_PlayerData.CharacterObject Character)
+    public void SendTutorialFlags(ref WS_Network.ClientClass client, ref CharacterObject Character)
     {
         Packets.PacketClass SMSG_TUTORIAL_FLAGS = new(Opcodes.SMSG_TUTORIAL_FLAGS);
         try
@@ -475,7 +497,7 @@ public class WS_PlayerHelper
         }
     }
 
-    public void SendFactions(ref WS_Network.ClientClass client, ref WS_PlayerData.CharacterObject Character)
+    public void SendFactions(ref WS_Network.ClientClass client, ref CharacterObject Character)
     {
         Packets.PacketClass packet = new(Opcodes.SMSG_INITIALIZE_FACTIONS);
         try
@@ -503,7 +525,7 @@ public class WS_PlayerHelper
         }
     }
 
-    public void SendActionButtons(ref WS_Network.ClientClass client, ref WS_PlayerData.CharacterObject Character)
+    public void SendActionButtons(ref WS_Network.ClientClass client, ref CharacterObject Character)
     {
         Packets.PacketClass packet = new(Opcodes.SMSG_ACTION_BUTTONS);
         try
@@ -535,7 +557,7 @@ public class WS_PlayerHelper
         }
     }
 
-    public void SendInitWorldStates(ref WS_Network.ClientClass client, ref WS_PlayerData.CharacterObject Character)
+    public void SendInitWorldStates(ref WS_Network.ClientClass client, ref CharacterObject Character)
     {
         Character.ZoneCheck();
         var NumberOfFields = Character.ZoneID switch
@@ -615,7 +637,7 @@ public class WS_PlayerHelper
         }
     }
 
-    public void SendInitialSpells(ref WS_Network.ClientClass client, ref WS_PlayerData.CharacterObject Character)
+    public void SendInitialSpells(ref WS_Network.ClientClass client, ref CharacterObject Character)
     {
         Packets.PacketClass packet = new(Opcodes.SMSG_INITIAL_SPELLS);
         checked
@@ -646,17 +668,17 @@ public class WS_PlayerHelper
                 packet.AddInt16(0);
                 foreach (var Cooldown in spellCooldowns)
                 {
-                    if (WorldServiceLocator.WSSpells.SPELLs.ContainsKey(Cooldown.Key))
+                    if (WS_Spells.SPELLs.ContainsKey(Cooldown.Key))
                     {
                         packet.AddUInt16((ushort)Cooldown.Key);
                         var timeLeft = 0;
-                        if (Cooldown.Value.Key > WorldServiceLocator.Functions.GetTimestamp(DateAndTime.Now))
+                        if (Cooldown.Value.Key > Globals.Functions.GetTimestamp(DateAndTime.Now))
                         {
-                            timeLeft = (int)(checked(Cooldown.Value.Key - WorldServiceLocator.Functions.GetTimestamp(DateAndTime.Now)) * 1000L);
+                            timeLeft = (int)(checked(Cooldown.Value.Key - Globals.Functions.GetTimestamp(DateAndTime.Now)) * 1000L);
                         }
                         packet.AddUInt16((ushort)Cooldown.Value.Value);
-                        packet.AddUInt16((ushort)WorldServiceLocator.WSSpells.SPELLs[Cooldown.Key].Category);
-                        if (WorldServiceLocator.WSSpells.SPELLs[Cooldown.Key].CategoryCooldown > 0)
+                        packet.AddUInt16((ushort)WS_Spells.SPELLs[Cooldown.Key].Category);
+                        if (WS_Spells.SPELLs[Cooldown.Key].CategoryCooldown > 0)
                         {
                             packet.AddInt32(0);
                             packet.AddInt32(timeLeft);
@@ -679,24 +701,24 @@ public class WS_PlayerHelper
         }
     }
 
-    public void InitializeTalentSpells(WS_PlayerData.CharacterObject objCharacter)
+    public void InitializeTalentSpells(CharacterObject objCharacter)
     {
-        WS_Spells.SpellTargets t = new();
+        var t = spellTargetsFactory.Create();
         WS_Base.BaseUnit objCharacter2 = objCharacter;
         t.SetTarget_SELF(ref objCharacter2);
-        objCharacter = (WS_PlayerData.CharacterObject)objCharacter2;
+        objCharacter = (CharacterObject)objCharacter2;
         foreach (var Spell in objCharacter.Spells)
         {
-            if (WorldServiceLocator.WSSpells.SPELLs.ContainsKey(Spell.Key) && WorldServiceLocator.WSSpells.SPELLs[Spell.Key].IsPassive)
+            if (WS_Spells.SPELLs.ContainsKey(Spell.Key) && WS_Spells.SPELLs[Spell.Key].IsPassive)
             {
-                if (!objCharacter.HavePassiveAura(Spell.Key) && WorldServiceLocator.WSSpells.SPELLs[Spell.Key].CanCast(ref objCharacter, t, FirstCheck: false) == SpellFailedReason.SPELL_NO_ERROR)
+                if (!objCharacter.HavePassiveAura(Spell.Key) && WS_Spells.SPELLs[Spell.Key].CanCast(ref objCharacter, t, FirstCheck: false) == SpellFailedReason.SPELL_NO_ERROR)
                 {
-                    var spellInfo = WorldServiceLocator.WSSpells.SPELLs[Spell.Key];
+                    var spellInfo = WS_Spells.SPELLs[Spell.Key];
                     WS_Base.BaseObject caster = objCharacter;
                     spellInfo.Apply(ref caster, t);
-                    objCharacter = (WS_PlayerData.CharacterObject)caster;
+                    objCharacter = (CharacterObject)caster;
                 }
-                else if (objCharacter.HavePassiveAura(Spell.Key) && WorldServiceLocator.WSSpells.SPELLs[Spell.Key].CanCast(ref objCharacter, t, FirstCheck: false) != SpellFailedReason.SPELL_NO_ERROR)
+                else if (objCharacter.HavePassiveAura(Spell.Key) && WS_Spells.SPELLs[Spell.Key].CanCast(ref objCharacter, t, FirstCheck: false) != SpellFailedReason.SPELL_NO_ERROR)
                 {
                     objCharacter.RemoveAuraBySpell(Spell.Key);
                 }

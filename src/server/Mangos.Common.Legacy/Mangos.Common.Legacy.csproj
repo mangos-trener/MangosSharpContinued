@@ -10,6 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Mangos.Configuration\Mangos.Configuration.csproj" />
     <ProjectReference Include="..\Mangos.DataStores\Mangos.DataStores.csproj" />
     <ProjectReference Include="..\Mangos.Logging\Mangos.Logging.csproj" />
     <ProjectReference Include="..\Mangos.Zip\Mangos.Zip.csproj" />

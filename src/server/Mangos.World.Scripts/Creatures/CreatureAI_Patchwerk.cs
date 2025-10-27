@@ -19,8 +19,13 @@
 using Mangos.Common.Enums.Chat;
 using Mangos.Common.Enums.Misc;
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
 using System;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 namespace Mangos.World.Scripts.Creatures;
 
@@ -45,7 +50,8 @@ public class CreatureAI_Patchwerk : WS_Creatures_AI.BossAI
     // Public NextSummon As Integer = 0
     public int CurrentWaypoint;
 
-    public CreatureAI_Patchwerk(ref WS_Creatures.CreatureObject Creature) : base(ref Creature)
+    public CreatureAI_Patchwerk(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature)
     {
         Phase = 0;
         AllowedMove = false;

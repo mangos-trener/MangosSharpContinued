@@ -16,11 +16,11 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Enums.Warden;
 using Mangos.Common.Globals;
 using Mangos.World.Globals;
 using Mangos.World.Player;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections.Generic;
@@ -31,17 +31,19 @@ public partial class WS_Warden
 {
     public class WardenScan
     {
-        private readonly WS_PlayerData.CharacterObject Character;
+        private readonly ILogger<WardenScan> logger;
+        private readonly CharacterObject Character;
 
         private readonly List<string> UsedStrings;
 
         private readonly List<CheatCheck> Checks;
 
-        public WardenScan(ref WS_PlayerData.CharacterObject objCharacter)
+        public WardenScan(ILogger<WardenScan> logger, ref CharacterObject objCharacter)
         {
             Character = null;
             UsedStrings = new List<string>();
             Checks = new List<CheatCheck>();
+            this.logger = logger;
             Character = objCharacter;
         }
 
@@ -172,50 +174,50 @@ public partial class WS_Warden
                         {
                             var result = p.GetInt8();
                             var bytes = p.GetByteArray();
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}] Result={1} Bytes=0x{2}", Check.Type, result, BitConverter.ToString(bytes).Replace("-", ""));
+                            logger.LogDebug("[WARDEN] [{0}] Result={1} Bytes=0x{2}", Check.Type, result, BitConverter.ToString(bytes).Replace("-", ""));
                             break;
                         }
                     case CheckTypes.PAGE_CHECK_A_B:
                         {
                             var result2 = p.GetInt8();
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}] Result={1}", Check.Type, result2);
+                            logger.LogDebug("[WARDEN] [{0}] Result={1}", Check.Type, result2);
                             break;
                         }
                     case CheckTypes.MPQ_CHECK:
                         {
                             var result3 = p.GetInt8();
                             var hash = p.GetByteArray();
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}] Result={1} Hash=0x{2}", Check.Type, result3, BitConverter.ToString(hash).Replace("-", ""));
+                            logger.LogDebug("[WARDEN] [{0}] Result={1} Hash=0x{2}", Check.Type, result3, BitConverter.ToString(hash).Replace("-", ""));
                             break;
                         }
                     case CheckTypes.LUA_STR_CHECK:
                         {
                             var unk = p.GetInt8();
                             var data = p.GetString2();
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}] Result={1} Data={2}", Check.Type, unk, data);
+                            logger.LogDebug("[WARDEN] [{0}] Result={1} Data={2}", Check.Type, unk, data);
                             break;
                         }
                     case CheckTypes.DRIVER_CHECK:
                         {
                             var result4 = p.GetInt8();
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}] Result={1}", Check.Type, result4);
+                            logger.LogDebug("[WARDEN] [{0}] Result={1}", Check.Type, result4);
                             break;
                         }
                     case CheckTypes.TIMING_CHECK:
                         {
                             var result5 = p.GetInt8();
                             var time = p.GetInt32();
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}] Result={1} Time={2}", Check.Type, result5, time);
+                            logger.LogDebug("[WARDEN] [{0}] Result={1} Time={2}", Check.Type, result5, time);
                             break;
                         }
                     case CheckTypes.PROC_CHECK:
                         {
                             var result6 = p.GetInt8();
-                            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}] Result={1}", Check.Type, result6);
+                            logger.LogDebug("[WARDEN] [{0}] Result={1}", Check.Type, result6);
                             break;
                         }
                     case CheckTypes.MODULE_CHECK:
-                        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "[WARDEN] [{0}]", Check.Type);
+                        logger.LogDebug("[WARDEN] [{0}]", Check.Type);
                         break;
                 }
             }

@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Autofac" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

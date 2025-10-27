@@ -16,10 +16,14 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
 using System;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 // Summon implementation isn't yet supported.
 // Sand trap not implemented into script, need to make a gameobject I assume.
@@ -51,7 +55,8 @@ public class CreatureAI_Kurinnax : WS_Creatures_AI.BossAI
     // Public Next_Summon_1 As Integer = 0
     // Public Next_Summon_2 As Integer = 0
 
-    public CreatureAI_Kurinnax(ref WS_Creatures.CreatureObject Creature) : base(ref Creature)
+    public CreatureAI_Kurinnax(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature)
     {
         phase = 0;
         AllowedMove = false;
@@ -103,7 +108,7 @@ public class CreatureAI_Kurinnax : WS_Creatures_AI.BossAI
             }
             catch (Exception)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.WARNING, "Mortal Wound failed to cast!");
+                logger.LogWarning("Mortal Wound failed to cast!");
             }
         }
 

@@ -25,35 +25,35 @@ namespace Mangos.Cluster.DataStores;
 
 public class WsDbcLoad
 {
-    private readonly ClusterServiceLocator _clusterServiceLocator;
+    private readonly WsDbcDatabase database;
 
-    public WsDbcLoad(ClusterServiceLocator clusterServiceLocator)
+    public WsDbcLoad(WsDbcDatabase database)
     {
-        _clusterServiceLocator = clusterServiceLocator;
+        this.database = database;
     }
 
-    public async Task InitializeInternalDatabaseAsync()
+    public async Task InitializeInternalDatabaseAsync(LegacyWorldCluster cluster)
     {
         await InitializeLoadDataStoresAsync().ConfigureAwait(false);
         try
         {
             // Set all characters offline
-            _clusterServiceLocator.WorldCluster.GetCharacterDatabase().Update("UPDATE characters SET char_online = 0;");
+            database.GetCharacterDatabase().Update("UPDATE characters SET char_online = 0;");
         }
         catch (Exception e)
         {
-            _clusterServiceLocator.WorldCluster.Log.WriteLine(LogType.FAILED, "Internal database initialization failed! [{0}]{1}{2}", e.Message, Constants.vbCrLf, e.ToString());
+            cluster.Log.WriteLine(LogType.FAILED, "Internal database initialization failed! [{0}]{1}{2}", e.Message, Constants.vbCrLf, e.ToString());
         }
     }
 
     private async Task InitializeLoadDataStoresAsync()
     {
-        _clusterServiceLocator.WsDbcDatabase.InitializeBattlegrounds();
+        database.InitializeBattlegrounds();
         await Task.WhenAll(
-            _clusterServiceLocator.WsDbcDatabase.InitializeMapsAsync(),
-            _clusterServiceLocator.WsDbcDatabase.InitializeChatChannelsAsync(),
-            _clusterServiceLocator.WsDbcDatabase.InitializeWorldSafeLocsAsync(),
-            _clusterServiceLocator.WsDbcDatabase.InitializeCharRacesAsync(),
-            _clusterServiceLocator.WsDbcDatabase.InitializeCharClassesAsync());
+            database.InitializeMapsAsync(),
+            database.InitializeChatChannelsAsync(),
+            database.InitializeWorldSafeLocsAsync(),
+            database.InitializeCharRacesAsync(),
+            database.InitializeCharClassesAsync());
     }
 }

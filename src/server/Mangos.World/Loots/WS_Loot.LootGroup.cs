@@ -16,6 +16,7 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.World.Objects.Factories.Loot;
 using System.Collections.Generic;
 
 namespace Mangos.World.Loots;
@@ -27,9 +28,12 @@ public partial class WS_Loot
         public List<LootStoreItem> ExplicitlyChanced;
 
         public List<LootStoreItem> EqualChanced;
+        private readonly LootItemFactory lootItemFactory;
 
-        public LootGroup()
+        public LootGroup(LootItemFactory lootItemFactory)
         {
+            this.lootItemFactory = lootItemFactory;
+
             ExplicitlyChanced = new List<LootStoreItem>();
             EqualChanced = new List<LootStoreItem>();
         }
@@ -58,7 +62,7 @@ public partial class WS_Loot
                         {
                             return ExplicitlyChanced[i];
                         }
-                        var rollChance = (float)(WorldServiceLocator.WorldServer.Rnd.NextDouble() * 100.0);
+                        var rollChance = (float)(WorldState.Rnd.NextDouble() * 100.0);
                         rollChance -= ExplicitlyChanced[i].Chance;
                         if (rollChance <= 0f)
                         {
@@ -66,7 +70,7 @@ public partial class WS_Loot
                         }
                     }
                 }
-                return EqualChanced.Count > 0 ? EqualChanced[WorldServiceLocator.WorldServer.Rnd.Next(0, EqualChanced.Count)] : null;
+                return EqualChanced.Count > 0 ? EqualChanced[WorldState.Rnd.Next(0, EqualChanced.Count)] : null;
             }
         }
 
@@ -75,7 +79,7 @@ public partial class WS_Loot
             var Item = Roll();
             if (Item != null)
             {
-                Loot.Items.Add(new LootItem(ref Item));
+                Loot.Items.Add(lootItemFactory.Create(ref Item));
             }
         }
     }

@@ -7,12 +7,17 @@
 
   <ItemGroup>
     <PackageReference Include="Autofac" />
+    <PackageReference Include="Microsoft.VisualBasic" />
     <PackageReference Include="System.CodeDom" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Mangos.Common.Legacy\Mangos.Common.Legacy.csproj" />
     <ProjectReference Include="..\Mangos.Configuration\Mangos.Configuration.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Objects\Factories\Creatures\" />
   </ItemGroup>
 
 </Project>

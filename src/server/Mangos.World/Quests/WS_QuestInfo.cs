@@ -16,9 +16,12 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
 using Mangos.Common.Legacy;
+using Mangos.Common.Legacy.Databases;
+using Mangos.World.Objects.Factories.Quests;
 using Mangos.World.Player;
+using Mangos.World.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections.Generic;
@@ -28,6 +31,9 @@ namespace Mangos.World.Quests;
 
 public class WS_QuestInfo : IDisposable
 {
+    private readonly ILogger<WS_QuestInfo> logger;
+    private readonly WorldState worldState;
+    private readonly IQuestInfoFactory questInfoFactory;
     public int ID;
 
     public List<int> PreQuests;
@@ -152,7 +158,7 @@ public class WS_QuestInfo : IDisposable
 
     private bool _disposedValue;
 
-    public WS_QuestInfo(int QuestID)
+    public WS_QuestInfo(ILogger<WS_QuestInfo> logger, WorldState worldState, WorldDatabase worldDatabase, IQuestInfoFactory questInfoFactory, int QuestID)
     {
         RewardItems = new int[6];
         RewardItems_Count = new int[6];
@@ -203,10 +209,13 @@ public class WS_QuestInfo : IDisposable
         CompleteEmote = 0;
         StartScript = 0;
         CompleteScript = 0;
+        this.logger = logger;
+        this.worldState = worldState;
+        this.questInfoFactory = questInfoFactory;
         ID = QuestID;
         PreQuests = new List<int>();
         DataTable MySQLQuery = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query($"SELECT * FROM quests WHERE entry = {QuestID};", ref MySQLQuery);
+        worldDatabase.Query($"SELECT * FROM quests WHERE entry = {QuestID};", ref MySQLQuery);
         if (MySQLQuery.Rows.Count == 0)
         {
             throw new ApplicationException("Quest " + Conversions.ToString(QuestID) + " not found in database.");
@@ -385,19 +394,19 @@ public class WS_QuestInfo : IDisposable
     {
         if (NextQuestInChain > 0)
         {
-            if (!WorldServiceLocator.WorldServer.ALLQUESTS.IsValidQuest(NextQuestInChain))
+            if (!worldState.QuestsService.IsValidQuest(NextQuestInChain))
             {
-                WS_QuestInfo tmpQuest2 = new(NextQuestInChain);
+                var tmpQuest2 = questInfoFactory.Create(NextQuestInChain);
                 if (!tmpQuest2.PreQuests.Contains(ID))
                 {
-                    WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Added prequest [{0}] to quest [{1}]", ID, NextQuestInChain);
+                    logger.LogDebug("Added prequest [{0}] to quest [{1}]", ID, NextQuestInChain);
                     tmpQuest2.PreQuests.Add(ID);
                 }
             }
-            else if (!WorldServiceLocator.WorldServer.ALLQUESTS.DoesPreQuestExist(NextQuestInChain, ID))
+            else if (!worldState.QuestsService.DoesPreQuestExist(NextQuestInChain, ID))
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Added prequest [{0}] to quest [{1}]", NextQuestInChain, ID);
-                WorldServiceLocator.WorldServer.ALLQUESTS.ReturnQuestInfoById(NextQuestInChain).PreQuests.Add(ID);
+                logger.LogDebug("Added prequest [{0}] to quest [{1}]", NextQuestInChain, ID);
+                worldState.QuestsService.ReturnQuestInfoById(NextQuestInChain).PreQuests.Add(ID);
             }
         }
         if (NextQuest == 0)
@@ -406,23 +415,23 @@ public class WS_QuestInfo : IDisposable
         }
         var unsignedNextQuest = Math.Abs(NextQuest);
         var signedQuestID = (NextQuest < 0) ? checked(-ID) : ID;
-        if (!WorldServiceLocator.WorldServer.ALLQUESTS.IsValidQuest(unsignedNextQuest))
+        if (!worldState.QuestsService.IsValidQuest(unsignedNextQuest))
         {
-            WS_QuestInfo tmpQuest = new(unsignedNextQuest);
+            var tmpQuest = questInfoFactory.Create(unsignedNextQuest);
             if (!tmpQuest.PreQuests.Contains(signedQuestID))
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Added prequest [{0}] to quest [{1}]", signedQuestID, unsignedNextQuest);
+                logger.LogDebug("Added prequest [{0}] to quest [{1}]", signedQuestID, unsignedNextQuest);
                 tmpQuest.PreQuests.Add(signedQuestID);
             }
         }
-        else if (!WorldServiceLocator.WorldServer.ALLQUESTS.DoesPreQuestExist(unsignedNextQuest, signedQuestID))
+        else if (!worldState.QuestsService.DoesPreQuestExist(unsignedNextQuest, signedQuestID))
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.DEBUG, "Added prequest [{0}] to quest [{1}]", signedQuestID, unsignedNextQuest);
-            WorldServiceLocator.WorldServer.ALLQUESTS.ReturnQuestInfoById(unsignedNextQuest).PreQuests.Add(signedQuestID);
+            logger.LogDebug("Added prequest [{0}] to quest [{1}]", signedQuestID, unsignedNextQuest);
+            worldState.QuestsService.ReturnQuestInfoById(unsignedNextQuest).PreQuests.Add(signedQuestID);
         }
     }
 
-    public bool CanSeeQuest(ref WS_PlayerData.CharacterObject objCharacter)
+    public bool CanSeeQuest(ref CharacterObject objCharacter)
     {
         var retValue = true;
         checked
@@ -438,8 +447,7 @@ public class WS_QuestInfo : IDisposable
         }
         if (ZoneOrSort < 0)
         {
-            WS_Quests tmpQuest = new();
-            var reqSort = tmpQuest.ClassByQuestSort(checked(-ZoneOrSort));
+            var reqSort = QuestHelpers.ClassByQuestSort(checked(-ZoneOrSort));
             if (reqSort > 0 && reqSort != (uint)objCharacter.Classe)
             {
                 retValue = false;
@@ -496,7 +504,7 @@ public class WS_QuestInfo : IDisposable
         return retValue;
     }
 
-    public bool SatisfyQuestLevel(ref WS_PlayerData.CharacterObject objCharacter)
+    public bool SatisfyQuestLevel(ref CharacterObject objCharacter)
     {
         return objCharacter.Level >= (uint)Level_Start;
     }

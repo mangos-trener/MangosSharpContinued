@@ -17,7 +17,12 @@
 //
 
 using Mangos.World.AI;
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
+using static Mangos.World.AI.WS_Creatures_AI;
 
 namespace Mangos.World.Scripts.Creatures;
 
@@ -30,7 +35,8 @@ public class CreatureAI_Ragefire_Trogg : WS_Creatures_AI.BossAI
     public int NextStrike;
     public int CurrentWaypoint;
 
-    public CreatureAI_Ragefire_Trogg(ref WS_Creatures.CreatureObject Creature) : base(ref Creature)
+    public CreatureAI_Ragefire_Trogg(ILogger<BossAI> logger, WorldState worldState, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat, ref WS_Creatures.CreatureObject Creature)
+        : base(logger, worldState, maps, loot, creatures, combat, ref Creature)
     {
         AllowedMove = false;
         Creature.Flying = false;

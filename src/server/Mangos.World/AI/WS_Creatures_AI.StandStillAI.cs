@@ -16,7 +16,11 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
+using Mangos.World.Handlers;
+using Mangos.World.Loots;
+using Mangos.World.Maps;
 using Mangos.World.Objects;
+using Microsoft.Extensions.Logging;
 using System;
 
 namespace Mangos.World.AI;
@@ -25,13 +29,10 @@ public partial class WS_Creatures_AI
 {
     public class StandStillAI : DefaultAI
     {
-        public StandStillAI(ref WS_Creatures.CreatureObject Creature)
-            : base(ref Creature)
+        public StandStillAI(ILogger<StandStillAI> logger, WorldState worldState, ref WS_Creatures.CreatureObject Creature, WS_Maps maps, WS_Loot loot, WS_Creatures creatures, WS_Combat combat)
+            : base(logger, worldState, ref Creature, maps, loot, creatures, combat)
         {
-            if (Creature is null)
-            {
-                throw new ArgumentNullException(nameof(Creature));
-            }
+            ArgumentNullException.ThrowIfNull(Creature);
 
             AllowedMove = false;
         }

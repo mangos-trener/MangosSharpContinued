@@ -16,33 +16,41 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Autofac;
-using GameServer;
+using GameServer.DependencyInjection;
 using Mangos.Cluster;
+using Mangos.Common.Legacy.Globals;
 using Mangos.Configuration;
 using Mangos.Logging;
-using Mangos.MySql;
 using Mangos.Tcp;
 using Mangos.World;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 Console.Title = "Game server";
 
-var builder = new ContainerBuilder();
-builder.RegisterModule<ConfigurationModule>();
-builder.RegisterModule<LoggingModule>();
-builder.RegisterModule<MySqlModule>();
-builder.RegisterModule<TcpModule>();
-builder.RegisterModule<GameModule>();
-builder.RegisterModule<LegacyClusterModule>();
-builder.RegisterModule<LegacyWorldModule>();
+var host = Host.CreateDefaultBuilder(args)
+    .ConfigureServices((context, services) =>
+    {
+        services.AddConfigurationFile()
+            .AddCustomLogging()
+            .AddMySqlDatabase()
+            .AddTcpServer()
+            .AddGameModule()
+            .AddLegacyClusterServices()
+            .AddLegacyWorldServices()
+            .AddFactories();
+    })
+    .Build();
 
-var container = builder.Build();
-var configuration = container.Resolve<MangosConfiguration>();
-var logger = container.Resolve<IMangosLogger>();
-var tcpServer = container.Resolve<TcpServer>();
-var legacyWorldCluster = container.Resolve<LegacyWorldCluster>();
-WorldServiceLocator.Container = container;
-var worldServer = container.Resolve<WorldServer>();
+var legacyGlobalFunctionsLogger = host.Services.GetRequiredService<IMangosLogger>();
+LegacyGlobalFunctions.InitializeLogger(legacyGlobalFunctionsLogger);
+
+var configuration = host.Services.GetRequiredService<MangosConfiguration>();
+var logger = host.Services.GetRequiredService<IMangosLogger>();
+var tcpServer = host.Services.GetRequiredService<TcpServer>();
+var legacyWorldCluster = host.Services.GetRequiredService<LegacyWorldCluster>();
+//WorldServiceLocator.Container = host.Services;
+var worldServer = host.Services.GetRequiredService<WorldServer>();
 
 logger.Trace(@" __  __      _  _  ___  ___  ___               ");
 logger.Trace(@"|  \/  |__ _| \| |/ __|/ _ \/ __|   We Love    ");
@@ -55,7 +63,7 @@ logger.Information("Starting legacy cluster server");
 await legacyWorldCluster.StartAsync();
 
 logger.Information("Starting legacy world server");
-await worldServer.StartAsync();
+//await worldServer.StartAsync();
 
 logger.Information("Starting game tcp server");
 await tcpServer.RunAsync(configuration.Cluster.ClusterServerEndpoint);

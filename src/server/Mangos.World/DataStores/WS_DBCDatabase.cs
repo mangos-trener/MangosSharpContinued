@@ -16,9 +16,11 @@
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 
-using Mangos.Common.Enums.Global;
+using Mangos.Common.Globals;
 using Mangos.Common.Legacy;
-using Mangos.World.Server;
+using Mangos.Common.Legacy.Databases;
+using Mangos.World.Handlers;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic.CompilerServices;
 using System;
 using System.Collections;
@@ -30,6 +32,10 @@ namespace Mangos.World.DataStores;
 
 public class WS_DBCDatabase
 {
+    private readonly ILogger<WS_DBCDatabase> logger;
+    private readonly WorldDatabase worldDatabase;
+    private readonly CharacterDatabase characterDatabase;
+
     public class TSkillLineAbility
     {
         public int ID;
@@ -489,74 +495,50 @@ public class WS_DBCDatabase
         }
     }
 
-    public Dictionary<int, int> EmotesState;
-
-    public Dictionary<int, int> EmotesText;
-
-    public Dictionary<int, int> SkillLines;
-
-    public Dictionary<int, TSkillLineAbility> SkillLineAbility;
-
-    public Dictionary<int, TTaxiNode> TaxiNodes;
-
-    public Dictionary<int, TTaxiPath> TaxiPaths;
-
-    public Dictionary<int, Dictionary<int, TTaxiPathNode>> TaxiPathNodes;
-
-    public Dictionary<int, int> TalentsTab;
-
-    public Dictionary<int, TalentInfo> Talents;
-
+    public const int DurabilityCosts_MAX = 300;
     public const int FACTION_TEMPLATES_COUNT = 2074;
 
+    public Dictionary<int, int> EmotesState;
+    public Dictionary<int, int> EmotesText;
+    public Dictionary<int, int> SkillLines;
+    public Dictionary<int, TSkillLineAbility> SkillLineAbility;
+    public Dictionary<int, TTaxiNode> TaxiNodes;
+    public Dictionary<int, TTaxiPath> TaxiPaths;
+    public Dictionary<int, Dictionary<int, TTaxiPathNode>> TaxiPathNodes;
+    public Dictionary<int, int> TalentsTab;
+    public Dictionary<int, TalentInfo> Talents;
     public Dictionary<int, TCharRace> CharRaces;
-
     public Dictionary<int, TCharClass> CharClasses;
-
     public Dictionary<int, TFaction> FactionInfo;
-
     public Dictionary<int, TFactionTemplate> FactionTemplatesInfo;
-
     public List<TSpellShapeshiftForm> SpellShapeShiftForm;
-
     public List<float> gtOCTRegenHP;
-
     public List<float> gtOCTRegenMP;
-
     public List<float> gtRegenHPPerSpt;
-
     public List<float> gtRegenMPPerSpt;
-
-    public const int DurabilityCosts_MAX = 300;
-
     public short[,] DurabilityCosts;
-
     public Dictionary<int, TSpellItemEnchantment> SpellItemEnchantments;
-
     public Dictionary<int, TItemSet> ItemSet;
-
     public Dictionary<int, TItemDisplayInfo> ItemDisplayInfo;
-
     public Dictionary<int, TItemRandomPropertiesInfo> ItemRandomPropertiesInfo;
-
     public Dictionary<int, byte> Battlemasters;
-
     public Dictionary<byte, TBattleground> Battlegrounds;
-
     public Dictionary<int, TTeleportCoords> TeleportCoords;
-
     public Dictionary<ulong, int> CreatureGossip;
-
     public Dictionary<int, CreatureFamilyInfo> CreaturesFamily;
-
     public Dictionary<int, Dictionary<int, CreatureMovePoint>> CreatureMovement;
-
     public Dictionary<int, CreatureEquipInfo> CreatureEquip;
-
     public Dictionary<int, CreatureModelInfo> CreatureModel;
 
-    public WS_DBCDatabase()
+    public WS_DBCDatabase(
+        ILogger<WS_DBCDatabase> logger,
+        WorldDatabase worldDatabase,
+        CharacterDatabase characterDatabase)
     {
+        this.logger = logger;
+        this.worldDatabase = worldDatabase;
+        this.characterDatabase = characterDatabase;
+
         EmotesState = new Dictionary<int, int>();
         EmotesText = new Dictionary<int, int>();
         SkillLines = new Dictionary<int, int>();
@@ -597,7 +579,7 @@ public class WS_DBCDatabase
         {
             if (TaxiNode.Value.MapID == map)
             {
-                var tmp = WorldServiceLocator.WSCombat.GetDistance(x, TaxiNode.Value.x, y, TaxiNode.Value.y);
+                var tmp = WS_Combat.GetDistance(x, TaxiNode.Value.x, y, TaxiNode.Value.y);
                 var minDistance = 1E+08f;
                 if (tmp < minDistance)
                 {
@@ -621,46 +603,38 @@ public class WS_DBCDatabase
         return null;
     }
 
-    private void InitializeXpTableFromDb()
+    public Dictionary<int, int> GetXpTable()
     {
+        var xpTable = new Dictionary<int, int>();
         DataTable result = null;
         try
         {
-            WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT * FROM player_xp_for_level order by lvl;", ref result);
+            worldDatabase.Query("SELECT * FROM player_xp_for_level ORDER BY lvl;", ref result);
+
             if (result.Rows.Count > 0)
             {
-                IEnumerator enumerator = default;
-                try
+                foreach (DataRow row in result.Rows)
                 {
-                    enumerator = result.Rows.GetEnumerator();
-                    while (enumerator.MoveNext())
-                    {
-                        DataRow row = (DataRow)enumerator.Current;
-                        var dbLvl = row.As<int>("lvl");
-                        var dbXp = row.As<long>("xp_for_next_level");
-                        WorldServiceLocator.WSPlayerInitializator.XPTable[dbLvl] = checked((int)dbXp);
-                    }
-                }
-                finally
-                {
-                    if (enumerator is IDisposable)
-                    {
-                        (enumerator as IDisposable).Dispose();
-                    }
+                    var dbLvl = row.As<int>("lvl");
+                    var dbXp = row.As<long>("xp_for_next_level");
+                    xpTable[dbLvl] = checked((int)dbXp);
                 }
             }
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "Initalizing: XPTable initialized.");
+
+            logger.LogInformation("XP data fetched from DB.");
         }
         catch (Exception ex)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "XPTable initialization failed.", ex);
+            logger.LogError("Failed to fetch XP data.", ex);
         }
+
+        return xpTable;
     }
 
     public void InitializeBattlemasters()
     {
         DataTable MySQLQuery = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT * FROM battlemaster_entry", ref MySQLQuery);
+        worldDatabase.Query("SELECT * FROM battlemaster_entry", ref MySQLQuery);
         IEnumerator enumerator = default;
         try
         {
@@ -678,13 +652,13 @@ public class WS_DBCDatabase
                 (enumerator as IDisposable).Dispose();
             }
         }
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "World: {0} Battlemasters Loaded.", MySQLQuery.Rows.Count);
+        logger.LogInformation("World: {0} Battlemasters Loaded.", MySQLQuery.Rows.Count);
     }
 
     public void InitializeBattlegrounds()
     {
         DataTable mySqlQuery = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT * FROM battleground_template", ref mySqlQuery);
+        worldDatabase.Query("SELECT * FROM battleground_template", ref mySqlQuery);
         IEnumerator enumerator = default;
         try
         {
@@ -711,13 +685,13 @@ public class WS_DBCDatabase
                 (enumerator as IDisposable).Dispose();
             }
         }
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "World: {0} Battlegrounds Loaded.", mySqlQuery.Rows.Count);
+        logger.LogInformation("World: {0} Battlegrounds Loaded.", mySqlQuery.Rows.Count);
     }
 
     public void InitializeTeleportCoords()
     {
         DataTable MySQLQuery = new();
-        WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT * FROM spells_teleport_coords", ref MySQLQuery);
+        worldDatabase.Query("SELECT * FROM spells_teleport_coords", ref MySQLQuery);
         IEnumerator enumerator = default;
         try
         {
@@ -741,80 +715,76 @@ public class WS_DBCDatabase
                 (enumerator as IDisposable).Dispose();
             }
         }
-        WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "World: {0} Teleport Coords Loaded.", MySQLQuery.Rows.Count);
+        logger.LogInformation("World: {0} Teleport Coords Loaded.", MySQLQuery.Rows.Count);
     }
 
     public async Task InitializeInternalDatabaseAsync()
     {
         await InitializeLoadDBCsAsync();
-        WorldServiceLocator.WSSpells.InitializeSpellDB();
-        WorldServiceLocator.WSCommands.RegisterChatCommands();
         try
         {
-            WorldServiceLocator.WSTimerBasedEvents.Regenerator = new WS_TimerBasedEvents.TRegenerator();
-            WorldServiceLocator.WSTimerBasedEvents.AIManager = new WS_TimerBasedEvents.TAIManager();
-            WorldServiceLocator.WSTimerBasedEvents.SpellManager = new WS_TimerBasedEvents.TSpellManager();
-            WorldServiceLocator.WSTimerBasedEvents.CharacterSaver = new WS_TimerBasedEvents.TCharacterSaver();
-            WorldServiceLocator.WSTimerBasedEvents.WeatherChanger = new WS_TimerBasedEvents.TWeatherChanger();
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.INFORMATION, "World: Loading Maps and Spawns....");
+            logger.LogInformation("World: Loading Maps and Spawns....");
+
             DataTable MySQLQuery = new();
             try
             {
-                WorldServiceLocator.WorldServer.CharacterDatabase.Query("SELECT MAX(item_guid) FROM characters_inventory;", ref MySQLQuery);
-                WorldServiceLocator.WorldServer.itemGuidCounter = MySQLQuery.Rows[0][0] != DBNull.Value
-                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], WorldServiceLocator.GlobalConstants.GUID_ITEM))
-                    : Convert.ToUInt64(decimal.Add(0m, new decimal(WorldServiceLocator.GlobalConstants.GUID_ITEM)));
+                characterDatabase.Query("SELECT MAX(item_guid) FROM characters_inventory;", ref MySQLQuery);
+                WorldState.ItemGuidCounter = MySQLQuery.Rows[0][0] != DBNull.Value
+                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], MangosGlobalConstants.GUID_ITEM))
+                    : Convert.ToUInt64(decimal.Add(0m, new decimal(MangosGlobalConstants.GUID_ITEM)));
             }
             catch (Exception ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "World: Failed loading characters_inventory....", ex);
+                logger.LogError("World: Failed loading characters_inventory....", ex);
             }
+
             MySQLQuery = new DataTable();
             try
             {
-                WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT MAX(guid) FROM creature;", ref MySQLQuery);
-                WorldServiceLocator.WorldServer.CreatureGUIDCounter = MySQLQuery.Rows[0][0] != DBNull.Value
-                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], WorldServiceLocator.GlobalConstants.GUID_UNIT))
-                    : Convert.ToUInt64(decimal.Add(0m, new decimal(WorldServiceLocator.GlobalConstants.GUID_UNIT)));
+                worldDatabase.Query("SELECT MAX(guid) FROM creature;", ref MySQLQuery);
+                WorldState.CreatureGuidCounter = MySQLQuery.Rows[0][0] != DBNull.Value
+                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], MangosGlobalConstants.GUID_UNIT))
+                    : Convert.ToUInt64(decimal.Add(0m, new decimal(MangosGlobalConstants.GUID_UNIT)));
             }
             catch (Exception ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "World: Failed loading creatures....", ex);
+                logger.LogError("World: Failed loading creatures....", ex);
             }
+
             MySQLQuery = new DataTable();
             try
             {
-                WorldServiceLocator.WorldServer.WorldDatabase.Query("SELECT MAX(guid) FROM gameobject;", ref MySQLQuery);
-                WorldServiceLocator.WorldServer.GameObjectsGUIDCounter = MySQLQuery.Rows[0][0] != DBNull.Value
-                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], WorldServiceLocator.GlobalConstants.GUID_GAMEOBJECT))
-                    : Convert.ToUInt64(decimal.Add(0m, new decimal(WorldServiceLocator.GlobalConstants.GUID_GAMEOBJECT)));
+                worldDatabase.Query("SELECT MAX(guid) FROM gameobject;", ref MySQLQuery);
+                WorldState.GameObjectsGuidCounter = MySQLQuery.Rows[0][0] != DBNull.Value
+                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], MangosGlobalConstants.GUID_GAMEOBJECT))
+                    : Convert.ToUInt64(decimal.Add(0m, new decimal(MangosGlobalConstants.GUID_GAMEOBJECT)));
             }
             catch (Exception ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "World: Failed loading gameobjects....", ex);
+                logger.LogError("World: Failed loading gameobjects....", ex);
             }
+
             MySQLQuery = new DataTable();
             try
             {
-                WorldServiceLocator.WorldServer.CharacterDatabase.Query("SELECT MAX(guid) FROM corpse", ref MySQLQuery);
-                WorldServiceLocator.WorldServer.CorpseGUIDCounter = MySQLQuery.Rows[0][0] != DBNull.Value
-                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], WorldServiceLocator.GlobalConstants.GUID_CORPSE))
-                    : Convert.ToUInt64(decimal.Add(0m, new decimal(WorldServiceLocator.GlobalConstants.GUID_CORPSE)));
+                characterDatabase.Query("SELECT MAX(guid) FROM corpse", ref MySQLQuery);
+                WorldState.CorpseGuidCounter = MySQLQuery.Rows[0][0] != DBNull.Value
+                    ? Conversions.ToULong(Operators.AddObject(MySQLQuery.Rows[0][0], MangosGlobalConstants.GUID_CORPSE))
+                    : Convert.ToUInt64(decimal.Add(0m, new decimal(MangosGlobalConstants.GUID_CORPSE)));
             }
             catch (Exception ex)
             {
-                WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "World: Failed loading corpse....", ex);
+                logger.LogError("World: Failed loading corpse....", ex);
             }
         }
         catch (Exception ex)
         {
-            WorldServiceLocator.WorldServer.Log.WriteLine(LogType.FAILED, "Internal database initialization failed! [{0}]{1}{2}", ex.Message, Environment.NewLine, ex.ToString());
+            logger.LogError("Internal database initialization failed! [{0}]{1}{2}", ex.Message, Environment.NewLine, ex.ToString());
         }
     }
 
     public async Task InitializeLoadDBCsAsync()
     {
-        InitializeXpTableFromDb();
         WorldServiceLocator.WSDBCLoad.LoadLootStores();
         WorldServiceLocator.WSDBCLoad.LoadWeather();
         InitializeBattlemasters();
