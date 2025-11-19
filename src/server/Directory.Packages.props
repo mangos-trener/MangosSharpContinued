@@ -5,7 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="SharpZipLib" Version="1.4.2" />
-    <PackageVersion Include="Autofac" Version="8.4.0" />
+    <PackageVersion Include="Autofac" Version="9.0.0" />
     <PackageVersion Include="System.CodeDom" Version="9.0.9" />
     <PackageVersion Include="Dapper" Version="2.1.66" />
     <PackageVersion Include="MySql.Data" Version="9.4.0" />
