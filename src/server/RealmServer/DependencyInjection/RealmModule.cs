@@ -23,7 +23,7 @@ using RealmServer.Handlers;
 using RealmServer.Network;
 using RealmServer.Requests;
 
-namespace RealmServer;
+namespace RealmServer.DependencyInjection;
 
 internal sealed class RealmModule : Module
 {

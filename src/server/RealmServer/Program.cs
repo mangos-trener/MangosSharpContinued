@@ -24,7 +24,7 @@ using Mangos.MySql;
 using Mangos.Tcp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using RealmServer;
+using RealmServer.DependencyInjection;
 using RealmServer.Services;
 
 Console.Title = "Realm server";
