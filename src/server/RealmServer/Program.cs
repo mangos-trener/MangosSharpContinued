@@ -17,32 +17,42 @@
 //
 
 using Autofac;
+using Autofac.Extensions.DependencyInjection;
 using Mangos.Configuration;
 using Mangos.Logging;
 using Mangos.MySql;
 using Mangos.Tcp;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using RealmServer;
+using RealmServer.Services;
 
 Console.Title = "Realm server";
 
-var builder = new ContainerBuilder();
-builder.RegisterModule<ConfigurationModule>();
-builder.RegisterModule<LoggingModule>();
-builder.RegisterModule<MySqlModule>();
-builder.RegisterModule<TcpModule>();
-builder.RegisterModule<RealmModule>();
+var host = Host.CreateDefaultBuilder(args)
 
-var container = builder.Build();
-var configuration = container.Resolve<MangosConfiguration>();
-var logger = container.Resolve<IMangosLogger>();
-var tcpServer = container.Resolve<TcpServer>();
+    //
+    // TEMPORARY Autofac bridge
+    //
+    .UseServiceProviderFactory(
+        new AutofacServiceProviderFactory())
 
-logger.Trace(@" __  __      _  _  ___  ___  ___               ");
-logger.Trace(@"|  \/  |__ _| \| |/ __|/ _ \/ __|   We Love    ");
-logger.Trace(@"| |\/| / _` | .` | (_ | (_) \__ \   Vanilla Wow");
-logger.Trace(@"|_|  |_\__,_|_|\_|\___|\___/|___/              ");
-logger.Trace("                                                ");
-logger.Trace("Website / Forum / Support: https://www.getmangos.eu/");
+    //
+    // Existing Autofac modules
+    //
+    .ConfigureContainer<ContainerBuilder>(containerBuilder =>
+    {
+        containerBuilder.RegisterModule<ConfigurationModule>();
+        containerBuilder.RegisterModule<LoggingModule>();
+        containerBuilder.RegisterModule<MySqlModule>();
+        containerBuilder.RegisterModule<TcpModule>();
+        containerBuilder.RegisterModule<RealmModule>();
+    })
 
-logger.Information("Starting realm tcp server");
-await tcpServer.RunAsync(configuration.Realm.RealmServerEndpoint);
+    //
+    // New native registrations
+    //
+    .ConfigureServices((context, services) => services.AddHostedService<RealmServerHostedService>())
+    .Build();
+
+await host.RunAsync();
