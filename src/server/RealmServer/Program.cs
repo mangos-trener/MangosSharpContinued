@@ -31,15 +31,11 @@ Console.Title = "Realm server";
 
 var host = Host.CreateDefaultBuilder(args)
 
-    //
     // TEMPORARY Autofac bridge
-    //
     .UseServiceProviderFactory(
         new AutofacServiceProviderFactory())
 
-    //
     // Existing Autofac modules
-    //
     .ConfigureContainer<ContainerBuilder>(containerBuilder =>
     {
         containerBuilder.RegisterModule<ConfigurationModule>();
@@ -49,10 +45,12 @@ var host = Host.CreateDefaultBuilder(args)
         containerBuilder.RegisterModule<RealmModule>();
     })
 
-    //
     // New native registrations
-    //
-    .ConfigureServices((context, services) => services.AddHostedService<RealmServerHostedService>())
+    .ConfigureServices((context, services) =>
+    {
+        services.AddRealm();
+        services.AddHostedService<RealmServerHostedService>();
+    })
     .Build();
 
 await host.RunAsync();
